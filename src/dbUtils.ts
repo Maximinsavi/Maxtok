@@ -152,13 +152,13 @@ export async function seedVideosIfEmpty() {
 }
 
 // User Profile Operations
-export async function createOrUpdateUser(user: { uid: string, displayName: string | null, email: string | null, photoURL: string | null }) {
+export async function createOrUpdateUser(user: { uid: string, displayName: string | null, email: string | null, photoURL: string | null, username?: string }) {
   try {
     const userRef = doc(db, 'users', user.uid);
     const userSnap = await getDoc(userRef);
     
     if (!userSnap.exists()) {
-      const username = (user.displayName || 'user').replace(/\s+/g, '_').toLowerCase() + '_' + Math.floor(Math.random() * 1000);
+      const username = user.username || (user.displayName || 'user').replace(/\s+/g, '_').toLowerCase() + '_' + Math.floor(Math.random() * 1000);
       const newUser: UserProfile = {
         id: user.uid,
         username,
@@ -179,6 +179,7 @@ export async function createOrUpdateUser(user: { uid: string, displayName: strin
         ...existingData,
         displayName: user.displayName || existingData.displayName,
         photoURL: user.photoURL || existingData.photoURL,
+        username: user.username || existingData.username
       };
       await setDoc(userRef, updatedUser, { merge: true });
       return updatedUser;
