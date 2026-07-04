@@ -1,0 +1,6 @@
+{
+  "name": "TikTok Clone",
+  "description": "Plateforme de vidéos courtes inspirée de TikTok avec flux infini, likes, commentaires, abonnements, messagerie privée, notifications et authentification Google.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

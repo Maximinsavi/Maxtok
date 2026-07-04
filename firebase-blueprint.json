@@ -1,0 +1,157 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile details synchronized from Google Auth or edited by the user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user ID (UID)" },
+        "username": { "type": "string", "description": "Unique username" },
+        "displayName": { "type": "string", "description": "Display name" },
+        "email": { "type": "string", "description": "User email address" },
+        "photoURL": { "type": "string", "description": "Avatar image URL" },
+        "bio": { "type": "string", "description": "User biography" },
+        "followersCount": { "type": "integer", "description": "Number of followers" },
+        "followingCount": { "type": "integer", "description": "Number of followed users" },
+        "preferences": { "type": "array", "description": "Selected video categories/preferences" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation timestamp" }
+      },
+      "required": ["id", "username", "displayName", "email", "createdAt"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Short video metadata and source URL uploaded or shared on the platform.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique video ID" },
+        "videoUrl": { "type": "string", "description": "Direct link to the MP4 file" },
+        "creatorId": { "type": "string", "description": "User ID of the creator" },
+        "creatorName": { "type": "string", "description": "Username of the creator" },
+        "creatorAvatar": { "type": "string", "description": "Avatar URL of the creator" },
+        "description": { "type": "string", "description": "Video caption or description" },
+        "category": { "type": "string", "description": "Video category (comedy, tech, music, etc.)" },
+        "songName": { "type": "string", "description": "Name of the audio track used" },
+        "likesCount": { "type": "integer", "description": "Number of likes" },
+        "commentsCount": { "type": "integer", "description": "Number of comments" },
+        "sharesCount": { "type": "integer", "description": "Number of times shared" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Time of publication" }
+      },
+      "required": ["id", "videoUrl", "creatorId", "creatorName", "description", "category", "createdAt"]
+    },
+    "Like": {
+      "title": "Like",
+      "description": "Record representing a video liked by a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "ID of the user who liked the video" },
+        "videoId": { "type": "string", "description": "ID of the liked video" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "videoId", "createdAt"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "A comment left on a video.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "videoId": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "userAvatar": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "videoId", "userId", "username", "text", "createdAt"]
+    },
+    "Follow": {
+      "title": "Follow",
+      "description": "Follow connection between two users.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Typically followerId_followingId" },
+        "followerId": { "type": "string" },
+        "followingId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["followerId", "followingId", "createdAt"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "A direct message chat conversation metadata.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "participants": { "type": "array" },
+        "lastMessage": { "type": "string" },
+        "lastMessageSenderId": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "unreadBy": { "type": "array" }
+      },
+      "required": ["id", "participants", "lastMessageAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A private message sent inside a chat room.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "senderId", "text", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Platform notification for a user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["like", "comment", "follow", "message"] },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderAvatar": { "type": "string" },
+        "targetId": { "type": "string" },
+        "text": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "senderId", "senderName", "text", "read", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles database."
+    },
+    "/videos/{videoId}": {
+      "schema": "Video",
+      "description": "Shared short video content."
+    },
+    "/videos/{videoId}/likes/{userId}": {
+      "schema": "Like",
+      "description": "Users who liked a particular video."
+    },
+    "/videos/{videoId}/comments/{commentId}": {
+      "schema": "Comment",
+      "description": "Comments left on a video."
+    },
+    "/follows/{followId}": {
+      "schema": "Follow",
+      "description": "Follower-following connections."
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Private direct message channels."
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Individual direct messages inside chats."
+    },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Activity alerts/notifications for users."
+    }
+  }
+}
