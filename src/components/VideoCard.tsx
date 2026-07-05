@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Heart, MessageCircle, Share2, Music2, Volume2, VolumeX, Play, Pause } from 'lucide-react';
 import { Video, UserProfile } from '../types';
 import { User } from 'firebase/auth';
-import { listenToLike, toggleLikeVideo, listenToFollow, toggleFollowUser, getUserProfile } from '../dbUtils';
+import { listenToLike, toggleLikeVideo, listenToFollow, toggleFollowUser, getUserProfile, getVideoFromLocalDB } from '../dbUtils';
 import CommentsDrawer from './CommentsDrawer';
 
 interface VideoCardProps {
@@ -37,6 +37,40 @@ export default function VideoCard({
   const [showHeartAnimation, setShowHeartAnimation] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [showPlayOverlay, setShowPlayOverlay] = useState(false);
+  const [resolvedUrl, setResolvedUrl] = useState('');
+
+  // Resolve Video URL (handles IndexedDB local store and fallback)
+  useEffect(() => {
+    let active = true;
+    let blobUrl = '';
+
+    if (video.videoUrl.startsWith('idb://')) {
+      const localId = video.videoUrl.substring(6);
+      getVideoFromLocalDB(localId).then((blob) => {
+        if (blob && active) {
+          blobUrl = URL.createObjectURL(blob);
+          setResolvedUrl(blobUrl);
+        } else if (active) {
+          // Fallback to Abstract Soundwave template video with audio
+          setResolvedUrl('https://assets.mixkit.co/videos/preview/mixkit-audio-wave-of-a-track-on-black-background-42352-large.mp4');
+        }
+      }).catch((err) => {
+        console.error("Error loading IndexedDB video:", err);
+        if (active) {
+          setResolvedUrl('https://assets.mixkit.co/videos/preview/mixkit-audio-wave-of-a-track-on-black-background-42352-large.mp4');
+        }
+      });
+    } else {
+      setResolvedUrl(video.videoUrl);
+    }
+
+    return () => {
+      active = false;
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+      }
+    };
+  }, [video.videoUrl, video.id]);
 
   // Synchronize play/pause state based on isActive prop
   useEffect(() => {
@@ -163,7 +197,7 @@ export default function VideoCard({
       {/* Video element */}
       <video
         ref={videoRef}
-        src={video.videoUrl}
+        src={resolvedUrl}
         loop
         playsInline
         webkit-playsinline="true"

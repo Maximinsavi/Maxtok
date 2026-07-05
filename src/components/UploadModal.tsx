@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { X, Video, Film, Sparkles, AlertCircle, Upload, Link, FileVideo, Info } from 'lucide-react';
-import { uploadCustomVideo } from '../dbUtils';
+import { uploadCustomVideo, saveVideoToLocalDB } from '../dbUtils';
 import { User } from 'firebase/auth';
 
 interface UploadModalProps {
@@ -43,15 +43,6 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
     setFileError('');
 
     const sizeInMB = file.size / (1024 * 1024);
-    
-    if (file.size > 2097152) { // > 2MB
-      setFileError("La vidéo dépasse la taille maximale autorisée de 2 Mo.");
-      setSelectedFile(null);
-      setFileInfo(null);
-      setVideoUrl('');
-      return;
-    }
-
     setSelectedFile(file);
 
     // If file size is under 750 KB, we store it persistently as Base64 in Firestore.
@@ -73,9 +64,10 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
       };
       reader.readAsDataURL(file);
     } else {
-      // Between 750 KB and 2 MB: Use local blob URL
-      const localUrl = URL.createObjectURL(file);
-      setVideoUrl(localUrl);
+      // Over 750 KB: Store locally inside IndexedDB upon clicking Publish.
+      // We generate a unique ID string.
+      const uniqueId = 'local_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      setVideoUrl('idb://' + uniqueId);
       setFileInfo({
         name: file.name,
         size: `${sizeInMB.toFixed(2)} Mo`,
@@ -120,6 +112,11 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
 
     setIsUploading(true);
     try {
+      if (selectedFile && videoUrl.startsWith('idb://')) {
+        const localId = videoUrl.substring(6);
+        await saveVideoToLocalDB(localId, selectedFile);
+      }
+
       await uploadCustomVideo({
         videoUrl: videoUrl.trim(),
         creatorId: currentUser.uid,
@@ -260,7 +257,7 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
                       {fileInfo ? "Changer de vidéo" : "Cliquez ou glissez une vidéo ici"}
                     </p>
                     <p className="text-xs text-zinc-500 mt-1 font-medium">
-                      Formats vidéo acceptés (MP4, WebM, etc.) &bull; Max 2 Mo
+                      Formats vidéo acceptés (MP4, WebM, etc.) &bull; Sans limite de Mo
                     </p>
                   </div>
                 </div>
@@ -284,10 +281,10 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
                   </div>
                   
                   {fileInfo.isLocalBlob ? (
-                    <div className="flex items-start gap-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-500 text-[11px] leading-relaxed">
+                    <div className="flex items-start gap-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-[11px] leading-relaxed">
                       <Info size={14} className="shrink-0 mt-0.5" />
                       <span>
-                        <strong>Vidéo entre 750 Ko et 2 Mo :</strong> Elle sera lue localement sur votre appareil pour cette session de démonstration, mais ne sera pas enregistrée de manière permanente dans la base de données globale de Firestore (limite de 1 Mo de Firestore par document).
+                        <strong>Vidéo haute capacité (&gt; 750 Ko) :</strong> Cette vidéo est sauvegardée de manière permanente dans la base de données locale rapide (IndexedDB) de votre navigateur. Elle sera jouée de manière fluide avec audio et sans aucune limite de taille !
                       </span>
                     </div>
                   ) : (

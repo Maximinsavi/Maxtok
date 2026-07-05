@@ -32,7 +32,9 @@ import {
   getVideos,
   getFollowers,
   getFollowing,
-  getLikedVideos
+  getLikedVideos,
+  listenToUserProfile,
+  getVideoFromLocalDB
 } from '../dbUtils';
 import { UserProfile, Video, DarkThemeType, THEMES } from '../types';
 
@@ -60,6 +62,45 @@ const PRESET_AVATARS = [
   { name: 'Modern Elegant', url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=150&q=80' },
   { name: 'Golden Hour', url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&q=80' },
 ];
+
+function ProfileVideoThumbnail({ video }: { video: Video }) {
+  const [resolvedUrl, setResolvedUrl] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = '';
+
+    if (video.videoUrl.startsWith('idb://')) {
+      const localId = video.videoUrl.substring(6);
+      getVideoFromLocalDB(localId).then((blob) => {
+        if (blob && active) {
+          objectUrl = URL.createObjectURL(blob);
+          setResolvedUrl(objectUrl);
+        } else if (active) {
+          setResolvedUrl('https://assets.mixkit.co/videos/preview/mixkit-audio-wave-of-a-track-on-black-background-42352-large.mp4');
+        }
+      });
+    } else {
+      setResolvedUrl(video.videoUrl);
+    }
+
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [video.videoUrl]);
+
+  return (
+    <video 
+      src={resolvedUrl} 
+      className="w-full h-full object-cover"
+      preload="metadata"
+      muted
+    />
+  );
+}
 
 export default function ProfileView({
   profileId,
@@ -99,30 +140,32 @@ export default function ProfileView({
 
   const isOwnProfile = currentUser ? currentUser.uid === profileId : false;
 
-  // Initial load
+  // Initial load with real-time profile updates
   useEffect(() => {
-    let active = true;
-    setLoading(true);
+    if (!profileId) return;
     
-    async function loadData() {
-      const uProfile = await getUserProfile(profileId);
-      if (!active) return;
-      
-      if (uProfile) {
+    setLoading(true);
+    let active = true;
+
+    // Listen to profile updates in real-time
+    const unsubscribeProfile = listenToUserProfile(profileId, (uProfile) => {
+      if (uProfile && active) {
         setProfile(uProfile);
-        // Setup initial editing fields
+        // Setup initial editing fields if not editing
         setEditDisplayName(uProfile.displayName);
         setEditUsername(uProfile.username);
         setEditPhotoURL(uProfile.photoURL);
         setEditBio(uProfile.bio || '');
-      } else if (isOwnProfile && currentUserProfile) {
+      } else if (isOwnProfile && currentUserProfile && active) {
         setProfile(currentUserProfile);
         setEditDisplayName(currentUserProfile.displayName);
         setEditUsername(currentUserProfile.username);
         setEditPhotoURL(currentUserProfile.photoURL);
         setEditBio(currentUserProfile.bio || '');
       }
-      
+    });
+    
+    async function loadVideos() {
       // Load user's videos
       const allVideos = await getVideos();
       if (!active) return;
@@ -131,8 +174,12 @@ export default function ProfileView({
       setLoading(false);
     }
     
-    loadData();
-    return () => { active = false; };
+    loadVideos();
+
+    return () => { 
+      active = false; 
+      unsubscribeProfile();
+    };
   }, [profileId, isOwnProfile, currentUserProfile]);
 
   // Sync tab data on change
@@ -212,6 +259,53 @@ export default function ProfileView({
     if (!avatarSeed.trim()) return;
     const generatedUrl = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(avatarSeed.trim())}`;
     setEditPhotoURL(generatedUrl);
+  };
+
+  const handleProfilePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setEditError('');
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 256;
+        const MAX_HEIGHT = 256;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.82);
+          setEditPhotoURL(compressedBase64);
+        }
+      };
+      img.onerror = () => {
+        setEditError("Impossible de charger l'image sélectionnée.");
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.onerror = () => {
+      setEditError("Erreur lors de la lecture du fichier photo.");
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSaveProfile = async () => {
@@ -526,12 +620,7 @@ export default function ProfileView({
                         onClick={() => onSelectVideo(vid.id)}
                         className="aspect-[9/16] bg-zinc-900 rounded-xl overflow-hidden relative cursor-pointer hover:opacity-80 hover:scale-[1.02] transition-all border border-zinc-800 shadow-md group"
                       >
-                        <video 
-                          src={vid.videoUrl} 
-                          className="w-full h-full object-cover"
-                          preload="metadata"
-                          muted
-                        />
+                        <ProfileVideoThumbnail video={vid} />
                         <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-colors" />
                         <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold text-white drop-shadow flex items-center gap-0.5">
                           ♥ {vid.likesCount}
@@ -733,6 +822,28 @@ export default function ProfileView({
                     <div className="absolute -bottom-1 -right-1 bg-rose-500 p-1.5 rounded-full text-white text-[9px] shadow border border-zinc-900">
                       ★
                     </div>
+                  </div>
+
+                  {/* Select from Gallery option */}
+                  <div className="w-full bg-zinc-950/80 p-3.5 rounded-2xl border border-zinc-800/60 space-y-2 text-left" id="profile-upload-gallery-container">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-wider flex items-center gap-1">
+                      <Camera size={12} className="text-rose-500" />
+                      Choisir depuis votre galerie
+                    </span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      id="profile-gallery-upload-input"
+                      onChange={handleProfilePhotoUpload}
+                      className="hidden" 
+                    />
+                    <label 
+                      htmlFor="profile-gallery-upload-input"
+                      className="mt-1 cursor-pointer w-full py-2.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm text-center"
+                    >
+                      <Camera size={14} />
+                      Sélectionner une photo de profil
+                    </label>
                   </div>
 
                   {/* Dicebear generator */}

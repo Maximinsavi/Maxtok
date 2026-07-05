@@ -190,6 +190,70 @@ export async function createOrUpdateUser(user: { uid: string, displayName: strin
   }
 }
 
+// Real-time listener for user profiles
+export function listenToUserProfile(userId: string, callback: (profile: UserProfile | null) => void) {
+  const userRef = doc(db, 'users', userId);
+  return onSnapshot(userRef, (docSnap) => {
+    if (docSnap.exists()) {
+      callback(docSnap.data() as UserProfile);
+    } else {
+      callback(null);
+    }
+  }, (err) => {
+    console.error("Error listening to user profile:", err);
+  });
+}
+
+// Simple IndexedDB wrapper for large video file storage
+const DB_NAME = 'VideoAppDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'videos';
+
+function getIDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveVideoToLocalDB(id: string, file: File | Blob): Promise<void> {
+  try {
+    const dbInstance = await getIDB();
+    return new Promise((resolve, reject) => {
+      const tx = dbInstance.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.put(file, id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.error("Failed to store video in IndexedDB:", err);
+  }
+}
+
+export async function getVideoFromLocalDB(id: string): Promise<Blob | null> {
+  try {
+    const dbInstance = await getIDB();
+    return new Promise((resolve, reject) => {
+      const tx = dbInstance.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.get(id);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.error("Failed to load video from IndexedDB:", err);
+    return null;
+  }
+}
+
 export async function getUserProfile(userId: string): Promise<UserProfile | null> {
   try {
     const snap = await getDoc(doc(db, 'users', userId));

@@ -7,7 +7,8 @@ import {
   getUserProfile, 
   createOrUpdateUser, 
   getFollowingIds,
-  listenToNotifications
+  listenToNotifications,
+  listenToUserProfile
 } from './dbUtils';
 import { Video, UserProfile, DarkThemeType, THEMES } from './types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -47,7 +48,7 @@ export default function App() {
   const [feedType, setFeedType] = useState<'foryou' | 'following'>('foryou');
   const [selectedCategory, setSelectedCategory] = useState<string | 'all'>('all');
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
-  const [isMuted, setIsMuted] = useState(true); // default muted for browser compliance
+  const [isMuted, setIsMuted] = useState(false); // default unmuted so voiceover audio plays automatically
 
   // Navigation states
   const [activeTab, setActiveTab] = useState<'feed' | 'inbox' | 'profile'>('feed');
@@ -68,37 +69,58 @@ export default function App() {
     // Seed database with mock videos on startup if empty
     seedVideosIfEmpty();
 
+    let unsubProfile: (() => void) | null = null;
+    let unsubNotifs: (() => void) | null = null;
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUser(user);
         // Load or create user profile
-        const profile = await createOrUpdateUser({
+        await createOrUpdateUser({
           uid: user.uid,
           displayName: user.displayName,
           email: user.email,
           photoURL: user.photoURL
         });
-        setCurrentUserProfile(profile);
+
+        // Listen to user profile updates in real-time
+        if (unsubProfile) unsubProfile();
+        unsubProfile = listenToUserProfile(user.uid, (profile) => {
+          if (profile) {
+            setCurrentUserProfile(profile);
+          }
+        });
 
         // Fetch following IDs
         const following = await getFollowingIds(user.uid);
         setFollowingIds(following);
 
         // Listen to notifications to show badge
-        const unsubNotifs = listenToNotifications(user.uid, (notifs) => {
+        if (unsubNotifs) unsubNotifs();
+        unsubNotifs = listenToNotifications(user.uid, (notifs) => {
           setUnreadCount(notifs.filter(n => !n.read).length);
         });
-
-        return () => unsubNotifs();
       } else {
         setCurrentUser(null);
         setCurrentUserProfile(null);
         setFollowingIds([]);
         setUnreadCount(0);
+        if (unsubProfile) {
+          unsubProfile();
+          unsubProfile = null;
+        }
+        if (unsubNotifs) {
+          unsubNotifs();
+          unsubNotifs = null;
+        }
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubProfile) unsubProfile();
+      if (unsubNotifs) unsubNotifs();
+    };
   }, []);
 
   // 2. Real-time updates for Videos to catch Likes/Comments counts instantly
