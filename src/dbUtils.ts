@@ -292,6 +292,21 @@ export async function getVideos(): Promise<Video[]> {
   }
 }
 
+// Listen to a specific user's videos in real-time
+export function listenToUserVideos(userId: string, callback: (videos: Video[]) => void) {
+  const q = query(
+    collection(db, 'videos'),
+    where('creatorId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  return onSnapshot(q, (snapshot) => {
+    const vids = snapshot.docs.map(doc => doc.data() as Video);
+    callback(vids);
+  }, (err) => {
+    console.error("Error listening to user videos:", err);
+  });
+}
+
 export async function uploadCustomVideo(
   videoData: Omit<Video, 'id' | 'likesCount' | 'commentsCount' | 'sharesCount' | 'createdAt'>,
   customId?: string
@@ -373,6 +388,36 @@ export async function getVideoChunks(videoId: string, mimeType: string = 'video/
   });
 
   return new Blob(byteCharactersList, { type: mimeType });
+}
+
+// Update a video's details (description, category, songName)
+export async function updateVideo(videoId: string, updatedFields: { description: string; category: string; songName: string }): Promise<void> {
+  try {
+    const videoRef = doc(db, 'videos', videoId);
+    await updateDoc(videoRef, updatedFields);
+  } catch (err) {
+    console.error("Error updating video doc:", err);
+    throw err;
+  }
+}
+
+// Delete a video and its corresponding chunks if any
+export async function deleteVideo(videoId: string): Promise<void> {
+  try {
+    // Delete parent document
+    const videoRef = doc(db, 'videos', videoId);
+    await deleteDoc(videoRef);
+
+    // Delete associated chunks in the subcollection
+    const chunksColl = collection(db, 'videos', videoId, 'chunks');
+    const snap = await getDocs(chunksColl);
+    for (const chunkDoc of snap.docs) {
+      await deleteDoc(chunkDoc.ref);
+    }
+  } catch (err) {
+    console.error("Error deleting video and chunks:", err);
+    throw err;
+  }
 }
 
 // Likes Operations

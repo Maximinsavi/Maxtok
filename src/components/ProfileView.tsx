@@ -19,6 +19,8 @@ import {
   Sparkles,
   Info,
   User,
+  Trash2,
+  X,
   Link as LinkIcon
 } from 'lucide-react';
 import { User as FirebaseUser, signOut } from 'firebase/auth';
@@ -30,6 +32,9 @@ import {
   toggleFollowUser, 
   createOrGetChat,
   getVideos,
+  listenToUserVideos,
+  updateVideo,
+  deleteVideo,
   getFollowers,
   getFollowing,
   getLikedVideos,
@@ -151,6 +156,52 @@ export default function ProfileView({
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [editError, setEditError] = useState('');
 
+  // Manage individual videos directly from profile
+  const [profileEditingVideo, setProfileEditingVideo] = useState<Video | null>(null);
+  const [profileEditDescription, setProfileEditDescription] = useState('');
+  const [profileEditCategory, setProfileEditCategory] = useState('');
+  const [profileEditSongName, setProfileEditSongName] = useState('');
+  const [profileIsSavingVideo, setProfileIsSavingVideo] = useState(false);
+
+  const handleOpenProfileEditVideo = (vid: Video, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent opening the video player!
+    setProfileEditingVideo(vid);
+    setProfileEditDescription(vid.description);
+    setProfileEditCategory(vid.category);
+    setProfileEditSongName(vid.songName);
+  };
+
+  const handleSaveProfileEditVideo = async () => {
+    if (!profileEditingVideo || !profileEditDescription.trim()) return;
+    setProfileIsSavingVideo(true);
+    try {
+      await updateVideo(profileEditingVideo.id, {
+        description: profileEditDescription.trim(),
+        category: profileEditCategory,
+        songName: profileEditSongName.trim() || 'Son original'
+      });
+      setProfileEditingVideo(null);
+    } catch (err) {
+      console.error("Error editing video from profile:", err);
+      alert("Une erreur s'est produite lors de la modification. Veuillez réessayer.");
+    } finally {
+      setProfileIsSavingVideo(false);
+    }
+  };
+
+  const handleDeleteProfileVideo = async (vidId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent opening the video player!
+    if (!window.confirm("Voulez-vous vraiment supprimer cette vidéo de manière permanente ?")) {
+      return;
+    }
+    try {
+      await deleteVideo(vidId);
+    } catch (err) {
+      console.error("Error deleting video from profile:", err);
+      alert("Une erreur s'est produite lors de la suppression. Veuillez réessayer.");
+    }
+  };
+
   const isOwnProfile = currentUser ? currentUser.uid === profileId : false;
 
   // Initial load with real-time profile updates
@@ -178,20 +229,18 @@ export default function ProfileView({
       }
     });
     
-    async function loadVideos() {
-      // Load user's videos
-      const allVideos = await getVideos();
-      if (!active) return;
-      const userVids = allVideos.filter(v => v.creatorId === profileId);
-      setVideos(userVids);
-      setLoading(false);
-    }
-    
-    loadVideos();
+    // Listen to user's videos in real-time
+    const unsubscribeVideos = listenToUserVideos(profileId, (userVids) => {
+      if (active) {
+        setVideos(userVids);
+        setLoading(false);
+      }
+    });
 
     return () => { 
       active = false; 
       unsubscribeProfile();
+      unsubscribeVideos();
     };
   }, [profileId, isOwnProfile, currentUserProfile]);
 
@@ -664,11 +713,31 @@ export default function ProfileView({
                       <div 
                         key={vid.id}
                         onClick={() => onSelectVideo(vid.id)}
-                        className="aspect-[9/16] bg-zinc-900 rounded-xl overflow-hidden relative cursor-pointer hover:opacity-80 hover:scale-[1.02] transition-all border border-zinc-800 shadow-md group"
+                        className="aspect-[9/16] bg-zinc-900 rounded-xl overflow-hidden relative cursor-pointer hover:scale-[1.01] transition-all border border-zinc-800 shadow-md group"
                       >
                         <ProfileVideoThumbnail video={vid} />
-                        <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-colors" />
-                        <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold text-white drop-shadow flex items-center gap-0.5">
+                        <div className="absolute inset-0 bg-black/10 group-hover:bg-black/35 transition-colors" />
+                        
+                        {isOwnProfile && (
+                          <div className="absolute top-1.5 right-1.5 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={(e) => handleOpenProfileEditVideo(vid, e)}
+                              className="p-1.5 bg-zinc-950/90 hover:bg-rose-500 rounded-md text-white border border-zinc-800 transition-all hover:scale-110 shadow-lg"
+                              title="Modifier"
+                            >
+                              <Edit3 size={11} />
+                            </button>
+                            <button
+                              onClick={(e) => handleDeleteProfileVideo(vid.id, e)}
+                              className="p-1.5 bg-zinc-950/90 hover:bg-red-600 rounded-md text-white border border-zinc-800 transition-all hover:scale-110 shadow-lg"
+                              title="Supprimer"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        )}
+
+                        <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold text-white drop-shadow flex items-center gap-0.5 bg-black/40 px-1.5 py-0.5 rounded-full backdrop-blur-sm">
                           ♥ {vid.likesCount}
                         </span>
                       </div>
@@ -1028,6 +1097,100 @@ export default function ProfileView({
                     <Save size={14} />
                   )}
                   Sauvegarder
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Profile Video Edit Modal Overlay */}
+      <AnimatePresence>
+        {profileEditingVideo && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ opacity: 0, y: 15, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 15, scale: 0.95 }}
+              className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Edit3 size={16} className="text-rose-500" />
+                  <span className="text-sm font-black text-white uppercase tracking-wider">Modifier la publication</span>
+                </div>
+                <button 
+                  onClick={() => setProfileEditingVideo(null)}
+                  className="p-1.5 text-zinc-500 hover:text-white rounded-full transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4 overflow-y-auto">
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider">Description / Légende</label>
+                  <textarea
+                    value={profileEditDescription}
+                    onChange={(e) => setProfileEditDescription(e.target.value)}
+                    className="w-full bg-zinc-950 text-xs p-3 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none resize-none h-24"
+                    placeholder="Entrez une légende..."
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider">Catégorie</label>
+                  <select
+                    value={profileEditCategory}
+                    onChange={(e) => setProfileEditCategory(e.target.value)}
+                    className="w-full bg-zinc-950 text-xs p-3 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none"
+                  >
+                    <option value="comedy">Humour 🎭</option>
+                    <option value="tech">Tech 💻</option>
+                    <option value="music">Musique 🎧</option>
+                    <option value="sports">Sports 🛹</option>
+                    <option value="food">Food 🍔</option>
+                    <option value="nature">Nature 🌲</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider">Musique / Son</label>
+                  <input
+                    type="text"
+                    value={profileEditSongName}
+                    onChange={(e) => setProfileEditSongName(e.target.value)}
+                    className="w-full bg-zinc-950 text-xs p-3 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none"
+                    placeholder="Son original"
+                  />
+                </div>
+              </div>
+
+              <div className="px-5 py-4 border-t border-zinc-800 bg-zinc-950 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setProfileEditingVideo(null)}
+                  className="px-4 py-2.5 bg-zinc-900 hover:bg-zinc-850 text-zinc-400 text-xs font-bold rounded-xl transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveProfileEditVideo}
+                  disabled={profileIsSavingVideo || !profileEditDescription.trim()}
+                  className="px-5 py-2.5 bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 disabled:opacity-50 shadow-md shadow-rose-500/10"
+                >
+                  {profileIsSavingVideo ? (
+                    <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Save size={14} />
+                  )}
+                  Enregistrer
                 </button>
               </div>
             </motion.div>

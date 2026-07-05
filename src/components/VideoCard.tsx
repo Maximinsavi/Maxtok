@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Heart, MessageCircle, Share2, Music2, Volume2, VolumeX, Play, Pause } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Music2, Volume2, VolumeX, Play, Pause, Edit3, Trash2, Save, X } from 'lucide-react';
 import { Video, UserProfile } from '../types';
 import { User } from 'firebase/auth';
-import { listenToLike, toggleLikeVideo, listenToFollow, toggleFollowUser, getUserProfile, getVideoFromLocalDB, getVideoChunks } from '../dbUtils';
+import { listenToLike, toggleLikeVideo, listenToFollow, toggleFollowUser, getUserProfile, getVideoFromLocalDB, getVideoChunks, listenToUserProfile, updateVideo, deleteVideo } from '../dbUtils';
 import CommentsDrawer from './CommentsDrawer';
 
 interface VideoCardProps {
@@ -39,6 +39,18 @@ export default function VideoCard({
   const [showPlayOverlay, setShowPlayOverlay] = useState(false);
   const [resolvedUrl, setResolvedUrl] = useState('');
   const [isLoadingChunks, setIsLoadingChunks] = useState(false);
+
+  // Sync state for updated creator profile and edit/delete operations
+  const [creatorProfile, setCreatorProfile] = useState<UserProfile | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editDescription, setEditDescription] = useState(video.description);
+  const [editCategory, setEditCategory] = useState(video.category);
+  const [editSongName, setEditSongName] = useState(video.songName);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const displayAvatar = creatorProfile?.photoURL || video.creatorAvatar;
+  const displayName = creatorProfile?.displayName || video.creatorName;
 
   // Resolve Video URL (handles IndexedDB local store, Firestore chunks, and fallback)
   useEffect(() => {
@@ -147,6 +159,59 @@ export default function VideoCard({
     });
     return () => unsubscribe();
   }, [video.creatorId, currentUser]);
+
+  // Real-time listener for creator profile updates (keeps profile pictures & display names updated live on all publications!)
+  useEffect(() => {
+    let unsubscribe: () => void = () => {};
+    if (video.creatorId) {
+      unsubscribe = listenToUserProfile(video.creatorId, (profile) => {
+        if (profile) {
+          setCreatorProfile(profile);
+        }
+      });
+    }
+    return () => unsubscribe();
+  }, [video.creatorId]);
+
+  // Reset edit fields when the video prop changes
+  useEffect(() => {
+    setEditDescription(video.description);
+    setEditCategory(video.category);
+    setEditSongName(video.songName);
+    setIsEditing(false);
+  }, [video]);
+
+  const handleSaveEdit = async () => {
+    if (!editDescription.trim()) return;
+    setIsSaving(true);
+    try {
+      await updateVideo(video.id, {
+        description: editDescription.trim(),
+        category: editCategory,
+        songName: editSongName.trim() || 'Son original'
+      });
+      setIsEditing(false);
+    } catch (err) {
+      console.error("Error editing video:", err);
+      alert("Une erreur s'est produite lors de la modification. Veuillez réessayer.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteVideo = async () => {
+    if (!window.confirm("Voulez-vous vraiment supprimer cette vidéo de manière permanente ?")) {
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      await deleteVideo(video.id);
+    } catch (err) {
+      console.error("Error deleting video:", err);
+      alert("Une erreur s'est produite lors de la suppression. Veuillez réessayer.");
+      setIsDeleting(false);
+    }
+  };
 
   const handlePlayPause = () => {
     const videoEl = videoRef.current;
@@ -295,8 +360,8 @@ export default function VideoCard({
             className="w-12 h-12 rounded-full border-2 border-white overflow-hidden active:scale-95 transition-transform shrink-0 shadow-lg"
           >
             <img 
-              src={video.creatorAvatar} 
-              alt={video.creatorName} 
+              src={displayAvatar} 
+              alt={displayName} 
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
             />
@@ -363,6 +428,47 @@ export default function VideoCard({
           </span>
         </div>
 
+        {/* Edit/Delete Buttons for the Creator */}
+        {currentUser?.uid === video.creatorId && (
+          <>
+            {/* Edit Button */}
+            <div className="flex flex-col items-center">
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditing(true);
+                }}
+                className="p-3 bg-rose-500 hover:bg-rose-600 rounded-full text-white backdrop-blur-md border border-rose-400/20 shadow-lg active:scale-90 transition-all"
+                id={`edit-video-btn-${video.id}`}
+                title="Modifier les détails"
+              >
+                <Edit3 size={22} />
+              </button>
+              <span className="text-white text-[10px] font-bold mt-1 drop-shadow-md uppercase tracking-wider">
+                Modifier
+              </span>
+            </div>
+
+            {/* Delete Button */}
+            <div className="flex flex-col items-center">
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteVideo();
+                }}
+                className="p-3 bg-zinc-900/80 hover:bg-red-600/90 rounded-full text-zinc-300 hover:text-white backdrop-blur-md border border-white/5 shadow-lg active:scale-90 transition-all"
+                id={`delete-video-btn-${video.id}`}
+                title="Supprimer la vidéo"
+              >
+                <Trash2 size={22} />
+              </button>
+              <span className="text-zinc-400 text-[10px] font-bold mt-1 drop-shadow-md uppercase tracking-wider">
+                Supprimer
+              </span>
+            </div>
+          </>
+        )}
+
         {/* Rotating Music Disc */}
         <div className="w-10 h-10 mt-2 rounded-full border border-zinc-700 bg-zinc-950 flex items-center justify-center animate-[spin_5s_linear_infinite] overflow-hidden shadow-xl">
           <div className="w-4 h-4 rounded-full bg-rose-500 flex items-center justify-center">
@@ -379,7 +485,7 @@ export default function VideoCard({
             onClick={() => onSelectCreator(video.creatorId)}
             className="text-white font-bold text-base hover:underline select-text"
           >
-            @{video.creatorName}
+            @{displayName}
           </button>
           
           {/* Category Badge */}
@@ -416,6 +522,111 @@ export default function VideoCard({
             currentUser={currentUser}
             onRequireAuth={onRequireAuth}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Edit Overlay Form */}
+      <AnimatePresence>
+        {isEditing && (
+          <div className="absolute inset-0 z-35 bg-black/95 backdrop-blur-md flex items-center justify-center p-6" onClick={(e) => e.stopPropagation()}>
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-5 text-left space-y-4 shadow-2xl relative"
+            >
+              <button 
+                onClick={() => setIsEditing(false)}
+                className="absolute top-3 right-3 p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-full transition-colors"
+              >
+                <X size={16} />
+              </button>
+
+              <div>
+                <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  <Edit3 size={16} className="text-rose-500" />
+                  Modifier la publication
+                </h4>
+                <p className="text-[11px] text-zinc-400 mt-1">Mettez à jour les détails de votre vidéo</p>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Description / Légende</label>
+                  <textarea
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    className="w-full bg-zinc-950 text-xs p-3 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none resize-none h-20"
+                    placeholder="Écrivez une description..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Catégorie</label>
+                  <select
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value)}
+                    className="w-full bg-zinc-950 text-xs p-3 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none"
+                  >
+                    <option value="comedy">Humour 🎭</option>
+                    <option value="tech">Tech 💻</option>
+                    <option value="music">Musique 🎧</option>
+                    <option value="sports">Sports 🛹</option>
+                    <option value="food">Food 🍔</option>
+                    <option value="nature">Nature 🌲</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Musique / Son</label>
+                  <input
+                    type="text"
+                    value={editSongName}
+                    onChange={(e) => setEditSongName(e.target.value)}
+                    className="w-full bg-zinc-950 text-xs p-3 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none"
+                    placeholder="Ex: Son original - @nom_utilisateur"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(false)}
+                  className="flex-1 py-2.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded-xl text-xs font-bold transition-all"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  disabled={isSaving || !editDescription.trim()}
+                  className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                >
+                  {isSaving ? (
+                    <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <Save size={14} />
+                      Enregistrer
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Deleting Overlay */}
+      <AnimatePresence>
+        {isDeleting && (
+          <div className="absolute inset-0 z-40 bg-black/95 flex flex-col items-center justify-center gap-2">
+            <div className="w-10 h-10 border-4 border-rose-500/20 border-t-rose-500 rounded-full animate-spin" />
+            <span className="text-xs text-rose-400 font-bold animate-pulse uppercase tracking-widest mt-2">
+              Suppression en cours...
+            </span>
+          </div>
         )}
       </AnimatePresence>
     </div>
