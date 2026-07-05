@@ -44,7 +44,9 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
 
   if (!isOpen) return null;
 
-  const getFriendlyErrorMessage = (errCode: string): string => {
+  const getFriendlyErrorMessage = (err: any): string => {
+    const errCode = err?.code || '';
+    const errMsg = err?.message || '';
     switch (errCode) {
       case 'auth/invalid-email':
         return "L'adresse e-mail n'est pas valide.";
@@ -63,7 +65,8 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
       case 'auth/missing-password':
         return "Le mot de passe est requis.";
       default:
-        return "Une erreur s'est produite. Veuillez réessayer.";
+        // Expose original error message to help troubleshooting (e.g. auth/operation-not-allowed)
+        return errMsg ? `${errMsg} (Code: ${errCode || 'inconnu'})` : "Une erreur s'est produite. Veuillez réessayer.";
     }
   };
 
@@ -84,7 +87,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
       }
     } catch (err: any) {
       console.error("Error signing in with Google:", err);
-      setError(getFriendlyErrorMessage(err.code || ''));
+      setError(getFriendlyErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -159,7 +162,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
       }
     } catch (err: any) {
       console.error("Authentication error:", err);
-      setError(getFriendlyErrorMessage(err.code || ''));
+      setError(getFriendlyErrorMessage(err));
     } finally {
       setIsLoading(false);
     }

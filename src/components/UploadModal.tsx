@@ -41,11 +41,22 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
 
     setError('');
     setFileError('');
-    setSelectedFile(file);
 
     const sizeInMB = file.size / (1024 * 1024);
     
-    if (file.size <= 1048576) { // <= 1MB
+    if (file.size > 2097152) { // > 2MB
+      setFileError("La vidéo dépasse la taille maximale autorisée de 2 Mo.");
+      setSelectedFile(null);
+      setFileInfo(null);
+      setVideoUrl('');
+      return;
+    }
+
+    setSelectedFile(file);
+
+    // If file size is under 750 KB, we store it persistently as Base64 in Firestore.
+    // 750 KB Base64 string is around 1 MB, which is the Firestore document limit.
+    if (file.size <= 768000) { 
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
@@ -62,7 +73,7 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
       };
       reader.readAsDataURL(file);
     } else {
-      // Over 1MB: Use local blob URL
+      // Between 750 KB and 2 MB: Use local blob URL
       const localUrl = URL.createObjectURL(file);
       setVideoUrl(localUrl);
       setFileInfo({
@@ -248,16 +259,16 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
                     <p className="text-sm font-semibold text-zinc-200">
                       {fileInfo ? "Changer de vidéo" : "Cliquez ou glissez une vidéo ici"}
                     </p>
-                    <p className="text-xs text-zinc-500 mt-1">
-                      Formats vidéo acceptés (MP4, WebM, etc.)
+                    <p className="text-xs text-zinc-500 mt-1 font-medium">
+                      Formats vidéo acceptés (MP4, WebM, etc.) &bull; Max 2 Mo
                     </p>
                   </div>
                 </div>
               </div>
 
               {fileError && (
-                <p className="text-xs text-rose-500 mt-1 flex items-center gap-1">
-                  <AlertCircle size={12} /> {fileError}
+                <p className="text-xs text-rose-500 mt-1.5 flex items-center gap-1 bg-rose-500/10 border border-rose-500/20 p-2 rounded-lg">
+                  <AlertCircle size={12} className="shrink-0" /> {fileError}
                 </p>
               )}
 
@@ -276,14 +287,14 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
                     <div className="flex items-start gap-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-500 text-[11px] leading-relaxed">
                       <Info size={14} className="shrink-0 mt-0.5" />
                       <span>
-                        <strong>Vidéo supérieure à 1 Mo :</strong> Elle sera lue localement sur votre appareil pour cette session de démonstration, mais ne sera pas enregistrée de manière permanente dans la base de données globale de Firestore (limite de 1 Mo par document).
+                        <strong>Vidéo entre 750 Ko et 2 Mo :</strong> Elle sera lue localement sur votre appareil pour cette session de démonstration, mais ne sera pas enregistrée de manière permanente dans la base de données globale de Firestore (limite de 1 Mo de Firestore par document).
                       </span>
                     </div>
                   ) : (
                     <div className="flex items-start gap-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-400 text-[11px] leading-relaxed">
                       <Sparkles size={14} className="shrink-0 mt-0.5" />
                       <span>
-                        <strong>Vidéo optimisée (&lt; 1 Mo) :</strong> Parfait ! Cette vidéo sera entièrement sauvegardée dans la base de données Firestore et visible par tous les utilisateurs.
+                        <strong>Vidéo optimisée (&lt; 750 Ko) :</strong> Parfait ! Cette vidéo sera entièrement sauvegardée dans la base de données Firestore et sera visible par tous les utilisateurs.
                       </span>
                     </div>
                   )}
