@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { X, Video, Film, Sparkles, AlertCircle, Upload, Link, FileVideo, Info } from 'lucide-react';
-import { uploadCustomVideo, saveVideoToLocalDB } from '../dbUtils';
+import { uploadCustomVideo, uploadCustomVideoChunks } from '../dbUtils';
 import { User } from 'firebase/auth';
 
 interface UploadModalProps {
@@ -64,10 +64,9 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
       };
       reader.readAsDataURL(file);
     } else {
-      // Over 750 KB: Store locally inside IndexedDB upon clicking Publish.
-      // We generate a unique ID string.
-      const uniqueId = 'local_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-      setVideoUrl('idb://' + uniqueId);
+      // Over 750 KB: Store as chunks in Firestore globally.
+      const uniqueId = 'v_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      setVideoUrl('chunked://' + uniqueId);
       setFileInfo({
         name: file.name,
         size: `${sizeInMB.toFixed(2)} Mo`,
@@ -112,9 +111,10 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
 
     setIsUploading(true);
     try {
-      if (selectedFile && videoUrl.startsWith('idb://')) {
-        const localId = videoUrl.substring(6);
-        await saveVideoToLocalDB(localId, selectedFile);
+      let customId: string | undefined;
+      if (selectedFile && videoUrl.startsWith('chunked://')) {
+        customId = videoUrl.substring(10);
+        await uploadCustomVideoChunks(customId, selectedFile);
       }
 
       await uploadCustomVideo({
@@ -124,8 +124,9 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
         creatorAvatar: currentUser.photoURL || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${currentUser.uid}`,
         description: description.trim(),
         category,
-        songName: songName.trim() || 'Son original'
-      });
+        songName: songName.trim() || 'Son original',
+        mimeType: selectedFile ? selectedFile.type : 'video/mp4'
+      }, customId);
       onUploadSuccess();
       onClose();
     } catch (err) {
@@ -284,7 +285,7 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
                     <div className="flex items-start gap-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-[11px] leading-relaxed">
                       <Info size={14} className="shrink-0 mt-0.5" />
                       <span>
-                        <strong>Vidéo haute capacité (&gt; 750 Ko) :</strong> Cette vidéo est sauvegardée de manière permanente dans la base de données locale rapide (IndexedDB) de votre navigateur. Elle sera jouée de manière fluide avec audio et sans aucune limite de taille !
+                        <strong>Vidéo haute capacité (&gt; 750 Ko) :</strong> Cette vidéo est sauvegardée de manière permanente dans la base de données cloud (Firestore) en morceaux optimisés. Elle sera lue par tous les utilisateurs avec audio et sans aucune limite de taille !
                       </span>
                     </div>
                   ) : (

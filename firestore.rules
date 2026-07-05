@@ -26,6 +26,12 @@ service cloud.firestore {
       allow update: if isAuthenticated() && (resource.data.creatorId == request.auth.uid || request.resource.data.likesCount != resource.data.likesCount || request.resource.data.commentsCount != resource.data.commentsCount);
       allow delete: if isAuthenticated() && resource.data.creatorId == request.auth.uid;
 
+      // Chunks rules (subcollection)
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow create, update, delete: if isAuthenticated() && get(/databases/$(database)/documents/videos/$(videoId)).data.creatorId == request.auth.uid;
+      }
+
       // Likes rules (subcollection)
       match /likes/{userId} {
         allow read: if true;

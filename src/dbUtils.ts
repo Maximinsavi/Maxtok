@@ -292,9 +292,12 @@ export async function getVideos(): Promise<Video[]> {
   }
 }
 
-export async function uploadCustomVideo(videoData: Omit<Video, 'id' | 'likesCount' | 'commentsCount' | 'sharesCount' | 'createdAt'>): Promise<Video> {
+export async function uploadCustomVideo(
+  videoData: Omit<Video, 'id' | 'likesCount' | 'commentsCount' | 'sharesCount' | 'createdAt'>,
+  customId?: string
+): Promise<Video> {
   try {
-    const videoRef = doc(collection(db, 'videos'));
+    const videoRef = customId ? doc(db, 'videos', customId) : doc(collection(db, 'videos'));
     const newVideo: Video = {
       ...videoData,
       id: videoRef.id,
@@ -309,6 +312,67 @@ export async function uploadCustomVideo(videoData: Omit<Video, 'id' | 'likesCoun
     console.error("Error creating custom video:", err);
     throw err;
   }
+}
+
+// Upload large videos in chunks to avoid Firestore document size limits
+export async function uploadCustomVideoChunks(videoId: string, file: File | Blob): Promise<void> {
+  const CHUNK_SIZE = 400 * 1024; // 400 KB base binary chunks
+  const totalSize = file.size;
+  let offset = 0;
+  let chunkIndex = 0;
+
+  while (offset < totalSize) {
+    const slice = file.slice(offset, offset + CHUNK_SIZE);
+    
+    // Convert slice to base64
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const resultStr = reader.result as string;
+        // Strip dataUrl prefix: e.g. "data:video/mp4;base64,"
+        const base64 = resultStr.substring(resultStr.indexOf(',') + 1);
+        resolve(base64);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(slice);
+    });
+
+    // Write chunk document to Firestore chunks subcollection
+    const chunkDocRef = doc(db, 'videos', videoId, 'chunks', String(chunkIndex));
+    await setDoc(chunkDocRef, {
+      videoId,
+      chunkIndex,
+      data: base64Data
+    });
+
+    offset += CHUNK_SIZE;
+    chunkIndex++;
+  }
+}
+
+// Retrieve large videos from Firestore chunks and reconstruct as local ObjectURL
+export async function getVideoChunks(videoId: string, mimeType: string = 'video/mp4'): Promise<Blob> {
+  const chunksColl = collection(db, 'videos', videoId, 'chunks');
+  const snap = await getDocs(query(chunksColl, orderBy('chunkIndex', 'asc')));
+  
+  if (snap.empty) {
+    throw new Error("No video chunks found for videoId: " + videoId);
+  }
+
+  const chunksData = snap.docs.map(doc => doc.data());
+  chunksData.sort((a, b) => (a.chunkIndex as number) - (b.chunkIndex as number));
+
+  const byteCharactersList = chunksData.map(chunk => {
+    const binaryString = atob(chunk.data as string);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  });
+
+  return new Blob(byteCharactersList, { type: mimeType });
 }
 
 // Likes Operations

@@ -34,7 +34,8 @@
         "likesCount": { "type": "integer", "description": "Number of likes" },
         "commentsCount": { "type": "integer", "description": "Number of comments" },
         "sharesCount": { "type": "integer", "description": "Number of times shared" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Time of publication" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Time of publication" },
+        "mimeType": { "type": "string", "description": "Mime type of the video" }
       },
       "required": ["id", "videoUrl", "creatorId", "creatorName", "description", "category", "createdAt"]
     },
@@ -118,6 +119,17 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "type", "senderId", "senderName", "text", "read", "createdAt"]
+    },
+    "VideoChunk": {
+      "title": "VideoChunk",
+      "description": "A base64 encoded chunk of a video file.",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string" },
+        "chunkIndex": { "type": "integer" },
+        "data": { "type": "string" }
+      },
+      "required": ["videoId", "chunkIndex", "data"]
     }
   },
   "firestore": {
@@ -128,6 +140,10 @@
     "/videos/{videoId}": {
       "schema": "Video",
       "description": "Shared short video content."
+    },
+    "/videos/{videoId}/chunks/{chunkId}": {
+      "schema": "VideoChunk",
+      "description": "Base64 chunks of a video file for size storage bypass."
     },
     "/videos/{videoId}/likes/{userId}": {
       "schema": "Like",

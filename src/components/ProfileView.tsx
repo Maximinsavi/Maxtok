@@ -34,7 +34,8 @@ import {
   getFollowing,
   getLikedVideos,
   listenToUserProfile,
-  getVideoFromLocalDB
+  getVideoFromLocalDB,
+  getVideoChunks
 } from '../dbUtils';
 import { UserProfile, Video, DarkThemeType, THEMES } from '../types';
 
@@ -70,7 +71,19 @@ function ProfileVideoThumbnail({ video }: { video: Video }) {
     let active = true;
     let objectUrl = '';
 
-    if (video.videoUrl.startsWith('idb://')) {
+    if (video.videoUrl.startsWith('chunked://')) {
+      const videoId = video.videoUrl.substring(10);
+      getVideoChunks(videoId, video.mimeType || 'video/mp4')
+        .then((blob) => {
+          if (blob && active) {
+            objectUrl = URL.createObjectURL(blob);
+            setResolvedUrl(objectUrl);
+          }
+        })
+        .catch((err) => {
+          console.error("Error loading chunked thumbnail:", err);
+        });
+    } else if (video.videoUrl.startsWith('idb://')) {
       const localId = video.videoUrl.substring(6);
       getVideoFromLocalDB(localId).then((blob) => {
         if (blob && active) {
@@ -90,7 +103,7 @@ function ProfileVideoThumbnail({ video }: { video: Video }) {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [video.videoUrl]);
+  }, [video.videoUrl, video.mimeType]);
 
   return (
     <video 
@@ -240,6 +253,22 @@ export default function ProfileView({
       ...prev,
       followersCount: prev.followersCount + (isFollowing ? -1 : 1)
     } : null);
+  };
+
+  const handleCopyProfileLink = () => {
+    const profileUrl = `${window.location.origin}${window.location.pathname}?profile=${profileId}`;
+    if (navigator.share) {
+      navigator.share({
+        title: `Profil de ${profile?.displayName || 'utilisateur'} sur TikApp`,
+        url: profileUrl,
+      }).catch(() => {
+        navigator.clipboard.writeText(profileUrl);
+        alert("Lien unique de ce profil copié dans le presse-papiers !");
+      });
+    } else {
+      navigator.clipboard.writeText(profileUrl);
+      alert("Lien unique de ce profil copié dans le presse-papiers !");
+    }
   };
 
   const handleMessageClick = async () => {
@@ -484,6 +513,14 @@ export default function ProfileView({
                 >
                   <MessageCircle size={20} />
                 </button>
+                <button
+                  onClick={handleCopyProfileLink}
+                  className="p-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-xl transition-colors border border-zinc-700/50"
+                  id="profile-share-btn-external"
+                  title="Copier le lien du profil"
+                >
+                  <LinkIcon size={20} />
+                </button>
               </div>
             )}
 
@@ -498,6 +535,15 @@ export default function ProfileView({
                   Modifier le profil
                 </button>
                 
+                <button
+                  onClick={handleCopyProfileLink}
+                  className="p-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center justify-center rounded-xl"
+                  id="profile-share-btn-self"
+                  title="Copier le lien de mon profil"
+                >
+                  <LinkIcon size={16} />
+                </button>
+
                 {/* Theme options toggle */}
                 <button
                   onClick={() => setShowThemePicker(!showThemePicker)}

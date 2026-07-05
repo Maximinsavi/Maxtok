@@ -22,7 +22,8 @@ import {
   Volume2,
   Sparkles,
   Search,
-  CheckCircle2
+  CheckCircle2,
+  X
 } from 'lucide-react';
 
 // Subcomponents
@@ -61,6 +62,8 @@ export default function App() {
   // Following list to filter following feed
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [showSearchBar, setShowSearchBar] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const feedContainerRef = useRef<HTMLDivElement>(null);
 
@@ -136,31 +139,41 @@ export default function App() {
     return () => unsubscribeVideos();
   }, []);
 
-  // 3. Filter videos based on Tab (For You / Following) and User Preferences
+  // 3. Filter videos based on Tab (For You / Following) and User Preferences/Search Query
   useEffect(() => {
     let filtered = [...allVideos];
 
-    // Filter by specific following feed
-    if (feedType === 'following') {
-      if (!currentUser) {
-        filtered = []; // Guests have no following feed
-      } else {
-        filtered = allVideos.filter(vid => followingIds.includes(vid.creatorId));
-      }
+    if (searchQuery.trim()) {
+      const queryLower = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(vid => 
+        vid.description.toLowerCase().includes(queryLower) ||
+        vid.creatorName.toLowerCase().includes(queryLower) ||
+        vid.category.toLowerCase().includes(queryLower) ||
+        (vid.songName && vid.songName.toLowerCase().includes(queryLower))
+      );
     } else {
-      // "For You" Feed: Apply preferences filter if user profile has preferences
-      if (currentUserProfile?.preferences && currentUserProfile.preferences.length > 0) {
-        filtered = allVideos.filter(vid => currentUserProfile.preferences?.includes(vid.category));
-        
-        // If everything is filtered out, fallback to all videos
-        if (filtered.length === 0) {
-          filtered = [...allVideos];
+      // Filter by specific following feed
+      if (feedType === 'following') {
+        if (!currentUser) {
+          filtered = []; // Guests have no following feed
+        } else {
+          filtered = allVideos.filter(vid => followingIds.includes(vid.creatorId));
         }
-      }
+      } else {
+        // "For You" Feed: Apply preferences filter if user profile has preferences
+        if (currentUserProfile?.preferences && currentUserProfile.preferences.length > 0) {
+          filtered = allVideos.filter(vid => currentUserProfile.preferences?.includes(vid.category));
+          
+          // If everything is filtered out, fallback to all videos
+          if (filtered.length === 0) {
+            filtered = [...allVideos];
+          }
+        }
 
-      // Apply horizontal manual tag filter
-      if (selectedCategory !== 'all') {
-        filtered = filtered.filter(vid => vid.category === selectedCategory);
+        // Apply horizontal manual tag filter
+        if (selectedCategory !== 'all') {
+          filtered = filtered.filter(vid => vid.category === selectedCategory);
+        }
       }
     }
 
@@ -170,7 +183,36 @@ export default function App() {
     if (feedContainerRef.current) {
       feedContainerRef.current.scrollTop = 0;
     }
-  }, [allVideos, feedType, followingIds, currentUserProfile, selectedCategory, currentUser]);
+  }, [allVideos, feedType, followingIds, currentUserProfile, selectedCategory, currentUser, searchQuery]);
+
+  // 4. Handle deep-linked URL parameters (video & profile unique shares)
+  useEffect(() => {
+    if (allVideos.length === 0) return;
+    
+    const params = new URLSearchParams(window.location.search);
+    const videoIdParam = params.get('video');
+    const profileIdParam = params.get('profile');
+
+    if (videoIdParam) {
+      const vidIndex = allVideos.findIndex(v => v.id === videoIdParam);
+      if (vidIndex !== -1) {
+        setFeedType('foryou');
+        setSelectedCategory('all');
+        setActiveTab('feed');
+        setCurrentVideoIndex(vidIndex);
+        
+        setTimeout(() => {
+          const container = feedContainerRef.current;
+          if (container) {
+            container.scrollTop = vidIndex * container.clientHeight;
+          }
+        }, 500);
+      }
+    } else if (profileIdParam) {
+      setSelectedProfileId(profileIdParam);
+      setActiveTab('profile');
+    }
+  }, [allVideos]);
 
   // Track index scrolling on feed
   const handleFeedScroll = () => {
@@ -265,7 +307,49 @@ export default function App() {
         
         {/* VIEW: MAIN FEED */}
         {activeTab === 'feed' && (
-          <div className="flex-1 flex flex-col h-full relative" id="feed-view-container">
+          <div className="flex-1 flex flex-col min-h-0 relative" id="feed-view-container">
+            {/* Slide-down Search Bar Overlay */}
+            <AnimatePresence>
+              {showSearchBar && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -50 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -50 }}
+                  className="absolute top-0 inset-x-0 bg-black/95 backdrop-blur-lg px-4 py-3 flex items-center gap-3 z-40 border-b border-zinc-850 shadow-xl"
+                  id="search-bar-overlay"
+                >
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-2.5 text-zinc-450" size={16} />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Rechercher vidéos, tags, créateurs..."
+                      className="w-full bg-zinc-900 text-sm pl-10 pr-10 py-2 rounded-xl text-white outline-none border border-zinc-800 focus:border-rose-500 transition-all placeholder-zinc-500 font-medium"
+                      autoFocus
+                    />
+                    {searchQuery && (
+                      <button 
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-3 top-2.5 text-zinc-400 hover:text-white transition-colors"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setShowSearchBar(false);
+                      setSearchQuery('');
+                    }}
+                    className="text-xs font-black uppercase tracking-wider text-rose-500 px-1 py-2"
+                  >
+                    Annuler
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Top Navigation Tabs (For You / Following) */}
             <div className="absolute top-0 inset-x-0 py-4 px-6 flex items-center justify-between z-30 bg-gradient-to-b from-black/60 to-transparent">
               {/* Left filter toggle */}
@@ -311,9 +395,14 @@ export default function App() {
               </div>
 
               {/* Right search / info */}
-              <div className="w-10 h-10 flex items-center justify-center bg-black/40 border border-white/15 backdrop-blur-md rounded-full text-zinc-300">
-                <Sparkles size={16} className="text-rose-500 animate-pulse" />
-              </div>
+              <button 
+                onClick={() => setShowSearchBar(true)}
+                className="w-10 h-10 flex items-center justify-center bg-black/40 border border-white/15 hover:bg-black/60 active:bg-rose-500/10 backdrop-blur-md rounded-full text-zinc-300 transition-all shadow-lg shrink-0"
+                id="search-trigger-btn"
+                title="Rechercher"
+              >
+                <Search size={16} className="text-zinc-300 hover:text-white" />
+              </button>
             </div>
 
             {/* Horizontal Video Category Quick Toggles (Only on For You feed) */}
@@ -398,7 +487,7 @@ export default function App() {
 
         {/* VIEW: INBOX (CHATS & NOTIFICATIONS) */}
         {activeTab === 'inbox' && (
-          <div className="flex-1 h-full overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">
             <InboxView
               currentUser={currentUser}
               currentUserProfile={currentUserProfile}
@@ -410,7 +499,7 @@ export default function App() {
 
         {/* VIEW: PROFILE (MINE OR CREATORS) */}
         {activeTab === 'profile' && (
-          <div className="flex-1 h-full overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">
             <ProfileView
               profileId={selectedProfileId || currentUser?.uid || ''}
               currentUser={currentUser}

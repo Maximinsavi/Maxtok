@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Heart, MessageCircle, Share2, Music2, Volume2, VolumeX, Play, Pause } from 'lucide-react';
 import { Video, UserProfile } from '../types';
 import { User } from 'firebase/auth';
-import { listenToLike, toggleLikeVideo, listenToFollow, toggleFollowUser, getUserProfile, getVideoFromLocalDB } from '../dbUtils';
+import { listenToLike, toggleLikeVideo, listenToFollow, toggleFollowUser, getUserProfile, getVideoFromLocalDB, getVideoChunks } from '../dbUtils';
 import CommentsDrawer from './CommentsDrawer';
 
 interface VideoCardProps {
@@ -38,13 +38,33 @@ export default function VideoCard({
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [showPlayOverlay, setShowPlayOverlay] = useState(false);
   const [resolvedUrl, setResolvedUrl] = useState('');
+  const [isLoadingChunks, setIsLoadingChunks] = useState(false);
 
-  // Resolve Video URL (handles IndexedDB local store and fallback)
+  // Resolve Video URL (handles IndexedDB local store, Firestore chunks, and fallback)
   useEffect(() => {
     let active = true;
     let blobUrl = '';
 
-    if (video.videoUrl.startsWith('idb://')) {
+    if (video.videoUrl.startsWith('chunked://')) {
+      const videoId = video.videoUrl.substring(10);
+      setIsLoadingChunks(true);
+      getVideoChunks(videoId, video.mimeType || 'video/mp4')
+        .then((blob) => {
+          if (blob && active) {
+            blobUrl = URL.createObjectURL(blob);
+            setResolvedUrl(blobUrl);
+          }
+        })
+        .catch((err) => {
+          console.error("Error loading chunked video from Firestore:", err);
+          if (active) {
+            setResolvedUrl('https://assets.mixkit.co/videos/preview/mixkit-audio-wave-of-a-track-on-black-background-42352-large.mp4');
+          }
+        })
+        .finally(() => {
+          if (active) setIsLoadingChunks(false);
+        });
+    } else if (video.videoUrl.startsWith('idb://')) {
       const localId = video.videoUrl.substring(6);
       getVideoFromLocalDB(localId).then((blob) => {
         if (blob && active) {
@@ -70,7 +90,7 @@ export default function VideoCard({
         URL.revokeObjectURL(blobUrl);
       }
     };
-  }, [video.videoUrl, video.id]);
+  }, [video.videoUrl, video.id, video.mimeType]);
 
   // Synchronize play/pause state based on isActive prop
   useEffect(() => {
@@ -174,17 +194,20 @@ export default function VideoCard({
   const handleShareClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // Fallback share logic
+    const uniqueUrl = `${window.location.origin}${window.location.pathname}?video=${video.id}`;
+    
     if (navigator.share) {
       navigator.share({
         title: `Vidéo de ${video.creatorName}`,
         text: video.description,
-        url: window.location.href,
-      }).catch(console.error);
+        url: uniqueUrl,
+      }).catch(() => {
+        navigator.clipboard.writeText(uniqueUrl);
+        alert("Lien unique de cette vidéo copié dans le presse-papiers !");
+      });
     } else {
-      // Copy to clipboard fallback
-      navigator.clipboard.writeText(window.location.href);
-      alert("Lien de l'application copié dans le presse-papiers !");
+      navigator.clipboard.writeText(uniqueUrl);
+      alert("Lien unique de cette vidéo copié dans le presse-papiers !");
     }
   };
 
@@ -208,9 +231,14 @@ export default function VideoCard({
       />
 
       {/* Loading Spinner */}
-      {!videoLoaded && (
-        <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
+      {(!videoLoaded || isLoadingChunks) && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/90 z-10 gap-2">
           <div className="w-10 h-10 border-4 border-rose-500/20 border-t-rose-500 rounded-full animate-spin" />
+          {isLoadingChunks && (
+            <span className="text-[10px] text-rose-400 font-bold animate-pulse uppercase tracking-widest mt-1">
+              Chargement Cloud...
+            </span>
+          )}
         </div>
       )}
 

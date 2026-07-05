@@ -24,6 +24,7 @@ export interface Video {
   commentsCount: number;
   sharesCount: number;
   createdAt: string;
+  mimeType?: string;
 }
 
 export interface Comment {
