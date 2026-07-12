@@ -467,6 +467,13 @@ export default function App() {
               currentUserProfile={currentUserProfile}
               onRequireAuth={handleRequireAuth}
               onSelectCreator={handleSelectCreatorProfile}
+              onNotificationAction={(type, targetId) => {
+                if (type === 'video') {
+                  handleSelectVideoGrid(targetId);
+                } else if (type === 'profile') {
+                  handleSelectCreatorProfile(targetId);
+                }
+              }}
             />
           </div>
         )}

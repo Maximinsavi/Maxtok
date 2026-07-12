@@ -459,10 +459,15 @@ export async function toggleLikeVideo(video: Video, userId: string, isCurrentlyL
     const videoRef = doc(db, 'videos', video.id);
     const likeRef = doc(db, 'videos', video.id, 'likes', userId);
     
-    if (isCurrentlyLiked) {
+    const snap = await getDoc(likeRef);
+    const exists = snap.exists();
+
+    if (exists) {
       // Unlike
       await deleteDoc(likeRef);
-      await updateDoc(videoRef, { likesCount: increment(-1) });
+      const currentVideoSnap = await getDoc(videoRef);
+      const currentLikes = currentVideoSnap.data()?.likesCount || 0;
+      await updateDoc(videoRef, { likesCount: Math.max(0, currentLikes - 1) });
     } else {
       // Like
       await setDoc(likeRef, {
@@ -670,21 +675,35 @@ export async function createOrGetChat(userAId: string, userBId: string): Promise
   }
 }
 
-export async function sendDirectMessage(chatId: string, senderId: string, receiverId: string, text: string) {
+export async function sendDirectMessage(
+  chatId: string, 
+  senderId: string, 
+  receiverId: string, 
+  text: string,
+  mediaUrl?: string,
+  mediaType?: 'image' | 'video' | 'audio'
+) {
   try {
     const messagesRef = collection(db, 'chats', chatId, 'messages');
     const messageDocRef = doc(messagesRef);
-    const newMessage: Message = {
+    const newMessage: Message & { mediaUrl?: string; mediaType?: string } = {
       id: messageDocRef.id,
       senderId,
       text,
       createdAt: new Date().toISOString()
     };
+    if (mediaUrl) newMessage.mediaUrl = mediaUrl;
+    if (mediaType) newMessage.mediaType = mediaType;
+
     await setDoc(messageDocRef, newMessage);
     
+    const previewText = mediaType 
+      ? `[${mediaType === 'image' ? 'Photo' : mediaType === 'video' ? 'Vidéo' : 'Message vocal'}] ${text}`.trim()
+      : text;
+
     // Update parent Chat document
     await updateDoc(doc(db, 'chats', chatId), {
-      lastMessage: text,
+      lastMessage: previewText,
       lastMessageSenderId: senderId,
       lastMessageAt: new Date().toISOString(),
       unreadBy: [receiverId]
@@ -697,7 +716,7 @@ export async function sendDirectMessage(chatId: string, senderId: string, receiv
         type: 'message',
         senderId,
         targetId: chatId,
-        text: `vous a envoyé un message : "${text.substring(0, 30)}..."`
+        text: `vous a envoyé un message : "${previewText.substring(0, 30)}..."`
       });
     }
   } catch (err) {
@@ -837,3 +856,69 @@ export async function getLikedVideos(userId: string): Promise<Video[]> {
     return [];
   }
 }
+
+// Calling System Helpers
+export async function createCallDoc(
+  callerId: string,
+  receiverId: string,
+  callerName: string,
+  callerAvatar: string,
+  type: 'audio' | 'video'
+): Promise<string> {
+  try {
+    const callRef = doc(collection(db, 'calls'));
+    await setDoc(callRef, {
+      id: callRef.id,
+      callerId,
+      receiverId,
+      callerName,
+      callerAvatar,
+      type,
+      status: 'ringing', // ringing, accepted, declined, ended
+      createdAt: new Date().toISOString()
+    });
+    return callRef.id;
+  } catch (err) {
+    console.error("Error creating call doc:", err);
+    throw err;
+  }
+}
+
+export function listenToActiveCalls(
+  userId: string,
+  callback: (calls: any[]) => void
+) {
+  const q = query(
+    collection(db, 'calls'),
+    where('receiverId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  return onSnapshot(q, (snapshot) => {
+    const activeCalls = snapshot.docs
+      .map(doc => doc.data())
+      .filter((c: any) => c.status === 'ringing' || c.status === 'accepted');
+    callback(activeCalls);
+  });
+}
+
+export function listenToSpecificCall(
+  callId: string,
+  callback: (call: any) => void
+) {
+  return onSnapshot(doc(db, 'calls', callId), (snapshot) => {
+    if (snapshot.exists()) {
+      callback(snapshot.data());
+    } else {
+      callback(null);
+    }
+  });
+}
+
+export async function updateCallStatus(callId: string, status: 'accepted' | 'declined' | 'ended') {
+  try {
+    await updateDoc(doc(db, 'calls', callId), { status });
+  } catch (err) {
+    console.error("Error updating call status:", err);
+  }
+}
+

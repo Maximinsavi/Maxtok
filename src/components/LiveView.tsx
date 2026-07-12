@@ -13,7 +13,8 @@ import {
   Award, 
   MessageSquare,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  Mic
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { User } from 'firebase/auth';
@@ -125,6 +126,10 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
   const [realLives, setRealLives] = useState<LiveStream[]>([]);
   const [currentLiveId, setCurrentLiveId] = useState<string | null>(null);
 
+  // Co-hosting Voice & webcam states
+  const [liveDocData, setLiveDocData] = useState<any>(null);
+  const [coHostStream, setCoHostStream] = useState<MediaStream | null>(null);
+
   // Subscribe to real-time active lives in Firestore
   useEffect(() => {
     if (!isOpen) return;
@@ -153,6 +158,47 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
 
     return () => unsubscribe();
   }, [isOpen]);
+
+  // Subscribe to real-time active single live stream document
+  useEffect(() => {
+    const liveId = selectedLive?.id || currentLiveId;
+    if (!liveId || !isOpen) {
+      setLiveDocData(null);
+      return;
+    }
+
+    const liveDocRef = doc(db, 'lives', liveId);
+    const unsubscribe = onSnapshot(liveDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setLiveDocData(data);
+      } else {
+        setLiveDocData(null);
+      }
+    }, (err) => {
+      console.error("Error listening to live document:", err);
+    });
+
+    return () => unsubscribe();
+  }, [selectedLive?.id, currentLiveId, isOpen]);
+
+  // Start local camera for co-host/guest when approved to speak
+  useEffect(() => {
+    const isMeCoHost = liveDocData?.coHostId === currentUser?.uid && liveDocData?.coHostStatus === 'accepted';
+    if (isMeCoHost && !coHostStream) {
+      navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 320 }, audio: true })
+        .then((stream) => {
+          setCoHostStream(stream);
+        })
+        .catch((err) => {
+          console.error("Co-host camera access failed, elegant fallback visual active:", err);
+        });
+    } else if (!isMeCoHost && coHostStream) {
+      coHostStream.getTracks().forEach(track => track.stop());
+      setCoHostStream(null);
+    }
+  }, [liveDocData?.coHostId, liveDocData?.coHostStatus, currentUser]);
+
   const [inputText, setInputText] = useState('');
   const [hearts, setHearts] = useState<FloatingHeart[]>([]);
   const heartIdCounterRef = useRef(0);
@@ -191,6 +237,10 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
     if (cameraStream) {
       cameraStream.getTracks().forEach(track => track.stop());
       setCameraStream(null);
+    }
+    if (coHostStream) {
+      coHostStream.getTracks().forEach(track => track.stop());
+      setCoHostStream(null);
     }
   };
 
@@ -261,7 +311,7 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
       });
     }, 5000);
 
-    // Simulate casual external hearts occasionally so viewer feels standard Tik-Tok flow activity
+    // Simulate casual external hearts occasionally so viewer feels standard flow activity
     chatIntervalRef.current = setInterval(() => {
       if (Math.random() > 0.4) {
         triggerFloatingHeart();
@@ -374,6 +424,10 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
         viewerCount: 0,
         bgGradient: randomBg,
         status: 'active',
+        coHostId: null,
+        coHostName: null,
+        coHostAvatar: null,
+        coHostStatus: 'none', // none, requesting, accepted
         createdAt: new Date().toISOString()
       };
 
@@ -474,6 +528,85 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
     setActiveScreen('streamer_summary');
   };
 
+  // Co-host "Request to speak / Ask to speak" Methods
+  const handleRequestToSpeak = async () => {
+    if (!currentUser || !currentUserProfile) {
+      onRequireAuth();
+      return;
+    }
+    const liveId = selectedLive?.id || currentLiveId;
+    if (!liveId) return;
+
+    try {
+      const myName = currentUserProfile.displayName || currentUserProfile.username || currentUser.email?.split('@')[0] || "Spectateur";
+      const myAvatar = currentUserProfile.photoURL || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${currentUser.uid}`;
+      
+      // Update the live doc
+      await updateDoc(doc(db, 'lives', liveId), {
+        coHostId: currentUser.uid,
+        coHostName: myName,
+        coHostAvatar: myAvatar,
+        coHostStatus: 'requesting'
+      });
+
+      // Post chat notice
+      const chatRef = collection(db, 'lives', liveId, 'chat');
+      const msgId = 'req_' + Math.random().toString(36).substring(2, 9);
+      await setDoc(doc(chatRef, msgId), {
+        id: msgId,
+        username: 'Studio 🎙️',
+        text: `@${myName} a demandé à parler en direct ! 📡`,
+        createdAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Error requesting speech:", err);
+    }
+  };
+
+  const handleCancelSpeakRequest = async () => {
+    const liveId = selectedLive?.id || currentLiveId;
+    if (!liveId) return;
+
+    try {
+      await updateDoc(doc(db, 'lives', liveId), {
+        coHostId: null,
+        coHostName: null,
+        coHostAvatar: null,
+        coHostStatus: 'none'
+      });
+    } catch (err) {
+      console.error("Error cancelling request:", err);
+    }
+  };
+
+  const handleStopSpeaking = async () => {
+    const liveId = selectedLive?.id || currentLiveId;
+    if (!liveId) return;
+
+    try {
+      const myName = currentUserProfile?.displayName || currentUserProfile?.username || "Guest";
+      
+      await updateDoc(doc(db, 'lives', liveId), {
+        coHostId: null,
+        coHostName: null,
+        coHostAvatar: null,
+        coHostStatus: 'none'
+      });
+
+      // Post chat notice
+      const chatRef = collection(db, 'lives', liveId, 'chat');
+      const msgId = 'stop_' + Math.random().toString(36).substring(2, 9);
+      await setDoc(doc(chatRef, msgId), {
+        id: msgId,
+        username: 'Studio 🎙️',
+        text: `@${myName} a arrêté de parler.`,
+        createdAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Error stopping speaking:", err);
+    }
+  };
+
   const formatDuration = (sec: number) => {
     const mins = Math.floor(sec / 60);
     const secs = sec % 60;
@@ -499,79 +632,98 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
             </div>
             <button 
               onClick={onClose}
-              className="p-1.5 hover:bg-zinc-800 rounded-full transition-colors"
-              id="close-lobby-btn"
+              className="p-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-full text-zinc-400 hover:text-white transition-colors"
             >
-              <X size={20} />
+              <X size={18} />
             </button>
           </div>
 
-          {/* Quick Actions Panel */}
-          <div className="p-5">
-            <button
+          {/* Core selection buttons (Broadcaster vs Viewer) */}
+          <div className="p-5 flex flex-col md:flex-row gap-4">
+            {/* CTA to launch streamer workspace */}
+            <div 
               onClick={handleGoLiveSetup}
-              className="w-full py-4 px-5 bg-gradient-to-r from-rose-500 to-pink-600 rounded-2xl flex items-center justify-between shadow-lg hover:brightness-110 active:scale-98 transition-all"
-              id="launch-live-btn"
+              className="flex-1 p-5 rounded-3xl bg-gradient-to-tr from-rose-550 via-rose-600 to-pink-600 hover:brightness-110 cursor-pointer shadow-xl transition-all hover:scale-[1.01] text-left relative overflow-hidden"
+              id="cta-go-live-setup"
             >
-              <div className="flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center backdrop-blur-md">
-                  <VideoIcon size={22} className="text-white" />
-                </div>
-                <div className="text-left">
-                  <h3 className="font-extrabold text-sm text-white uppercase tracking-wider">Lancer un Direct</h3>
-                  <p className="text-[11px] text-rose-100 mt-0.5 font-medium">Partagez votre univers avec la communauté en temps réel !</p>
-                </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full translate-x-12 -translate-y-12" />
+              <div className="w-11 h-11 bg-white/10 rounded-2xl flex items-center justify-center border border-white/20 mb-3.5">
+                <VideoIcon size={20} className="text-white animate-pulse" />
               </div>
-              <ChevronRight size={18} className="text-white/80" />
-            </button>
+              <h3 className="text-base font-black uppercase tracking-wider">Lancer mon Live !</h3>
+              <p className="text-xs text-white/80 mt-1 max-w-xs leading-normal">
+                Diffusez votre caméra en direct, interagissez en temps réel avec vos abonnés et partagez la parole !
+              </p>
+              <div className="mt-5 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-white/90">
+                <span>Accéder au studio</span>
+                <ChevronRight size={12} />
+              </div>
+            </div>
+
+            {/* CTA to list mock lives */}
+            <div className="flex-1 p-5 rounded-3xl bg-zinc-900 border border-zinc-800 text-left relative overflow-hidden flex flex-col justify-between">
+              <div>
+                <h3 className="text-sm font-black uppercase text-zinc-400 tracking-wider">Comment ça marche ?</h3>
+                <p className="text-xs text-zinc-500 mt-1 leading-normal max-w-xs">
+                  Rejoignez un live existant pour écouter le créateur ou demandez la parole d'un simple clic pour discuter avec lui en direct.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-zinc-600 block mt-4">
+                Powered by Google Firestore LiveSync
+              </span>
+            </div>
           </div>
 
-          {/* Divider Title */}
-          <div className="px-5 pb-2 pt-1">
-            <h2 className="text-xs font-black uppercase tracking-widest text-zinc-500 flex items-center gap-2">
-              <Radio size={12} className="text-rose-500 animate-pulse" />
-              Lives en cours ({displayedLives.length})
-            </h2>
-          </div>
+          {/* Active lives list */}
+          <div className="flex-1 overflow-y-auto px-5 pb-8">
+            <h3 className="text-[10px] uppercase font-black tracking-widest text-zinc-500 mb-3.5 text-left flex items-center gap-1.5">
+              <Sparkles size={11} className="text-rose-500" />
+              Diffusions actives en ce moment
+            </h3>
 
-          {/* Live Streams Directory */}
-          <div className="flex-1 overflow-y-auto px-5 pb-6 space-y-4">
-            {displayedLives.map((live) => (
-              <div
-                key={live.id}
-                onClick={() => handleJoinLive(live)}
-                className="group relative h-40 rounded-2xl bg-zinc-900 overflow-hidden border border-zinc-850 cursor-pointer hover:border-rose-500/50 transition-all shadow-md active:scale-99 flex flex-col justify-between"
-              >
-                {/* Visual Cover (Gradient) */}
-                <div className={`absolute inset-0 bg-gradient-to-br ${live.bgGradient} opacity-20 group-hover:opacity-30 transition-opacity`} />
-                
-                {/* Top stats overlay */}
-                <div className="relative p-4 flex items-center justify-between z-10">
-                  <div className="flex items-center gap-1.5 px-2 py-1 bg-rose-500 rounded-lg text-[9px] font-black uppercase tracking-wider shadow-sm">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                    Direct
-                  </div>
-                  <div className="flex items-center gap-1 px-2.5 py-1 bg-black/60 backdrop-blur-sm rounded-lg text-[9px] font-bold text-zinc-300">
-                    <Users size={10} className="text-rose-400" />
-                    {live.viewerCount >= 1000 ? `${(live.viewerCount / 1000).toFixed(1)}k` : live.viewerCount} spectateurs
-                  </div>
-                </div>
-
-                {/* Bottom user details */}
-                <div className="relative p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent z-10 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full border-2 border-rose-500/50 overflow-hidden shrink-0">
-                    <img src={live.streamerAvatar} alt={live.streamerName} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="text-left overflow-hidden">
-                    <span className="text-[10px] text-rose-400 font-extrabold tracking-wide uppercase">@{live.streamerName}</span>
-                    <h4 className="text-xs font-bold text-white leading-relaxed mt-0.5 truncate pr-2">{live.title}</h4>
-                    <span className="inline-block mt-1 text-[9px] text-zinc-400 font-medium px-2 py-0.5 rounded bg-zinc-850/80 border border-zinc-800">
-                      {live.category}
-                    </span>
-                  </div>
-                </div>
+            {displayedLives.length === 0 ? (
+              <div className="border border-dashed border-zinc-850 p-12 rounded-3xl text-center text-zinc-500">
+                <Radio size={36} className="text-zinc-700 mx-auto mb-3" />
+                <p className="text-xs font-bold text-zinc-400">Aucun direct pour l'instant</p>
+                <p className="text-[10px] text-zinc-600 mt-1 leading-normal">Soyez le premier à lancer un direct de haute qualité !</p>
               </div>
-            ))}
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {displayedLives.map((live) => (
+                  <div
+                    key={live.id}
+                    onClick={() => handleJoinLive(live)}
+                    className="group bg-zinc-900 hover:bg-zinc-850/80 border border-zinc-800/80 hover:border-zinc-750 rounded-3xl overflow-hidden cursor-pointer shadow-lg transition-all text-left flex flex-col justify-between h-[155px] relative"
+                  >
+                    {/* Top category / view tags */}
+                    <div className="p-3.5 flex items-center justify-between z-10">
+                      <div className="flex items-center gap-1.5 px-2 py-1 bg-rose-500 rounded-lg text-[9px] font-black uppercase tracking-wider shadow-sm">
+                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                        Direct
+                      </div>
+                      <div className="flex items-center gap-1 px-2.5 py-1 bg-black/60 backdrop-blur-sm rounded-lg text-[9px] font-bold text-zinc-300">
+                        <Users size={10} className="text-rose-400" />
+                        {live.viewerCount >= 1000 ? `${(live.viewerCount / 1000).toFixed(1)}k` : live.viewerCount} spectateurs
+                      </div>
+                    </div>
+
+                    {/* Bottom details */}
+                    <div className="relative p-4 bg-gradient-to-t from-black/95 via-black/50 to-transparent z-10 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full border-2 border-rose-500/50 overflow-hidden shrink-0">
+                        <img src={live.streamerAvatar} alt={live.streamerName} className="w-full h-full object-cover" />
+                      </div>
+                      <div className="text-left overflow-hidden">
+                        <span className="text-[10px] text-rose-450 font-extrabold tracking-wide uppercase">@{live.streamerName}</span>
+                        <h4 className="text-xs font-bold text-white leading-relaxed mt-0.5 truncate pr-2">{live.title}</h4>
+                        <span className="inline-block mt-1 text-[9px] text-zinc-400 font-medium px-2 py-0.5 rounded bg-zinc-850/80 border border-zinc-800">
+                          {live.category}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -580,22 +732,75 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
       {activeScreen === 'viewer' && selectedLive && (
         <div className="flex-1 flex flex-col h-full bg-black text-white relative overflow-hidden">
           
-          {/* Simulated stream background wrapper */}
-          <div className={`absolute inset-0 bg-gradient-to-tr ${selectedLive.bgGradient} opacity-40 flex items-center justify-center`}>
-            {/* Ambient visual soundwaves / camera representation */}
-            <div className="flex flex-col items-center gap-4 text-center select-none">
-              <div className="w-24 h-24 rounded-full bg-white/10 flex items-center justify-center border border-white/25 backdrop-blur-xl shadow-2xl scale-110">
-                <Radio size={40} className="text-white animate-pulse" />
+          {/* Dual video stream layout rendering if co-host is accepted */}
+          <div className="absolute inset-0 flex flex-col justify-stretch">
+            {liveDocData?.coHostStatus === 'accepted' ? (
+              <div className="flex-1 grid grid-rows-2 h-full w-full">
+                {/* Host screen */}
+                <div className={`relative bg-gradient-to-tr ${selectedLive.bgGradient} opacity-90 flex flex-col items-center justify-center p-4 border-b border-white/10`}>
+                  <div className="flex flex-col items-center gap-2 text-center select-none">
+                    <div className="w-16 h-16 rounded-full bg-white/15 flex items-center justify-center border border-white/20 backdrop-blur-md shadow-2xl scale-105">
+                      <Radio size={26} className="text-white animate-pulse" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-black tracking-tight">{selectedLive.streamerName}</h3>
+                      <p className="text-[10px] text-white/70">Broadcaster principal</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Co-host speaker screen */}
+                <div className="relative bg-zinc-950 flex flex-col items-center justify-center p-4">
+                  {liveDocData?.coHostId === currentUser?.uid && coHostStream ? (
+                    <video
+                      ref={(el) => {
+                        if (el) el.srcObject = coHostStream;
+                      }}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="absolute inset-0 w-full h-full object-cover transform -scale-x-100"
+                    />
+                  ) : (
+                    /* Display elegant speaking indicators */
+                    <div className="flex flex-col items-center gap-2 text-center select-none z-10">
+                      <div className="relative">
+                        <img src={liveDocData?.coHostAvatar} className="w-16 h-16 rounded-full object-cover border-2 border-cyan-400 shadow-xl" />
+                        <span className="absolute -bottom-1 -right-1 bg-cyan-400 p-1 rounded-full text-black">
+                          <Mic size={10} className="fill-black" />
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black tracking-tight text-cyan-400">@{liveDocData?.coHostName}</h3>
+                        <p className="text-[9px] text-zinc-400">En direct avec le micro</p>
+                      </div>
+                      <div className="flex gap-1 items-center justify-center h-4 mt-1">
+                        <span className="w-1 h-3 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                        <span className="w-1 h-4 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+                        <span className="w-1 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0.5s' }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div>
-                <h2 className="text-lg font-black tracking-tight">{selectedLive.streamerName.split(' ')[0]} est en Direct</h2>
-                <p className="text-xs text-white/60 font-medium">Flux audio & vidéo de haute qualité</p>
+            ) : (
+              /* Normal single broadcaster layout */
+              <div className={`absolute inset-0 bg-gradient-to-tr ${selectedLive.bgGradient} opacity-50 flex items-center justify-center`}>
+                <div className="flex flex-col items-center gap-4 text-center select-none">
+                  <div className="w-24 h-24 rounded-full bg-white/10 flex items-center justify-center border border-white/25 backdrop-blur-xl shadow-2xl scale-110">
+                    <Radio size={40} className="text-white animate-pulse" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-black tracking-tight">{selectedLive.streamerName.split(' ')[0]} est en Direct</h2>
+                    <p className="text-xs text-white/60 font-medium">Flux audio & vidéo de haute qualité</p>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Vignette filters for UI readability */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/60 pointer-events-none z-10" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/30 to-black/75 pointer-events-none z-10" />
 
           {/* Top Panel (Host Info & Viewers) */}
           <div className="relative p-4 flex items-center justify-between z-20 bg-gradient-to-b from-black/50 to-transparent">
@@ -648,7 +853,7 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
               <div ref={chatEndRef} />
             </div>
 
-            {/* Interaction bar (Likes, keyboard) */}
+            {/* Interaction bar (Likes, speak request, keyboard) */}
             <div className="p-4 flex items-center gap-2.5 pointer-events-auto bg-gradient-to-t from-black/80 to-transparent">
               <form onSubmit={handleSendChatMessage} className="flex-1 flex gap-2">
                 <input
@@ -665,6 +870,40 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
                   <Send size={15} />
                 </button>
               </form>
+
+              {/* SPEAK / MIC REQUEST BUTTONS */}
+              {liveDocData?.coHostId === currentUser?.uid ? (
+                liveDocData?.coHostStatus === 'requesting' ? (
+                  <button
+                    onClick={handleCancelSpeakRequest}
+                    className="px-3.5 py-2.5 bg-amber-500 hover:bg-amber-600 text-black text-[9px] font-black uppercase tracking-wider rounded-xl transition-all shrink-0 shadow-lg animate-pulse"
+                    title="En attente... Cliquez pour annuler."
+                  >
+                    En attente...
+                  </button>
+                ) : liveDocData?.coHostStatus === 'accepted' ? (
+                  <button
+                    onClick={handleStopSpeaking}
+                    className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-[9px] font-black uppercase tracking-wider rounded-xl transition-all shrink-0 shadow-lg flex items-center gap-1.5"
+                    title="Quitter la discussion vocale"
+                  >
+                    <StopCircle size={12} />
+                    <span>Quitter</span>
+                  </button>
+                ) : null
+              ) : liveDocData?.coHostStatus === 'accepted' ? (
+                <div className="px-3 py-2 bg-zinc-900 border border-zinc-800 text-zinc-500 text-[8px] font-black uppercase rounded-xl shrink-0">
+                  @{(liveDocData?.coHostName || "Guest").split(' ')[0]} parle
+                </div>
+              ) : (
+                <button
+                  onClick={handleRequestToSpeak}
+                  className="w-10 h-10 flex items-center justify-center bg-cyan-500 hover:bg-cyan-600 rounded-xl text-black shadow-lg shrink-0 transition-transform active:scale-90"
+                  title="Demander à parler en direct"
+                >
+                  <Mic size={16} />
+                </button>
+              )}
 
               {/* Heart/Like clicker */}
               <button
@@ -734,7 +973,7 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
                   <div>
                     <h4 className="text-xs font-bold text-white uppercase tracking-wider">Caméra virtuelle active</h4>
                     <p className="text-[11px] text-zinc-500 mt-1 max-w-xs leading-normal">
-                      Aucune webcam détectée ou permission refusée. Le studio simulera un flux élégant de niveau professionnel !
+                      Aucune webcam détectée ou permission refusée. Le studio simulera un flux de haute qualité !
                     </p>
                   </div>
                 </div>
@@ -804,34 +1043,140 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
       {activeScreen === 'streamer' && (
         <div className="flex-1 flex flex-col h-full bg-black text-white relative overflow-hidden">
           
-          {/* Video stream rendering */}
-          <div className="absolute inset-0 bg-zinc-950">
-            {cameraError ? (
-              /* Fallback Visual for streamers with no webcam */
-              <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-rose-950/40 to-indigo-950/40 flex flex-col items-center justify-center p-6 text-center">
-                <div className="relative mb-5">
-                  <div className="w-24 h-24 rounded-full border border-rose-500 bg-rose-500/10 flex items-center justify-center scale-110">
-                    <Radio size={40} className="text-rose-400 animate-pulse" />
-                  </div>
-                  <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full animate-ping" />
+          {/* FLOATING INCOMING CO-HOST REQUEST OVERLAY */}
+          {liveDocData?.coHostStatus === 'requesting' && (
+            <div className="absolute top-16 left-4 right-4 bg-zinc-900/95 backdrop-blur-md p-3.5 rounded-2xl border border-rose-550 shadow-2xl z-40 flex items-center justify-between gap-3 pointer-events-auto">
+              <div className="flex items-center gap-2.5 text-left min-w-0">
+                <img src={liveDocData.coHostAvatar} className="w-8 h-8 rounded-full border border-zinc-800 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-black text-white truncate">@{liveDocData.coHostName}</p>
+                  <p className="text-[10px] text-zinc-400">Demande à parler en direct</p>
                 </div>
-                <p className="text-xs font-black uppercase tracking-wider text-rose-400">Diffusion active</p>
-                <h4 className="text-sm font-bold text-white mt-1 max-w-xs">{streamTitle}</h4>
-                <p className="text-[10px] text-zinc-500 mt-1">Votre flux audio micro est diffusé en direct.</p>
+              </div>
+              <div className="flex gap-1.5 shrink-0">
+                <button
+                  onClick={async () => {
+                    await updateDoc(doc(db, 'lives', liveDocData.id), {
+                      coHostStatus: 'accepted'
+                    });
+                    const chatRef = collection(db, 'lives', liveDocData.id, 'chat');
+                    const msgId = 'sys_' + Math.random().toString(36).substring(2, 9);
+                    await setDoc(doc(chatRef, msgId), {
+                      id: msgId,
+                      username: 'Studio 🔴',
+                      text: `@${liveDocData.coHostName} a rejoint la parole en direct ! 🎙️`,
+                      createdAt: new Date().toISOString()
+                    });
+                  }}
+                  className="px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] font-black rounded-lg uppercase tracking-wider transition-colors"
+                >
+                  Accepter
+                </button>
+                <button
+                  onClick={async () => {
+                    await updateDoc(doc(db, 'lives', liveDocData.id), {
+                      coHostId: null,
+                      coHostName: null,
+                      coHostAvatar: null,
+                      coHostStatus: 'none'
+                    });
+                  }}
+                  className="px-2.5 py-1.5 bg-zinc-850 hover:bg-zinc-800 text-zinc-300 text-[9px] font-black rounded-lg uppercase tracking-wider transition-colors"
+                >
+                  Décliner
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Video stream rendering - split if cohost accepted */}
+          <div className="absolute inset-0 bg-zinc-950">
+            {liveDocData?.coHostStatus === 'accepted' ? (
+              <div className="w-full h-full grid grid-rows-2">
+                {/* Host screen */}
+                <div className="relative bg-black flex items-center justify-center border-b border-white/10">
+                  {cameraError ? (
+                    <div className="text-center p-4">
+                      <Radio size={30} className="text-rose-400 animate-pulse mx-auto mb-2" />
+                      <p className="text-xs">Caméra active</p>
+                    </div>
+                  ) : (
+                    <video
+                      ref={streamerVideoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="absolute inset-0 w-full h-full object-cover transform -scale-x-100"
+                    />
+                  )}
+                  <span className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/60 rounded text-[9px] font-bold z-20">
+                    Vous (Host)
+                  </span>
+                </div>
+
+                {/* Speaking Guest screen */}
+                <div className="relative bg-zinc-950 flex flex-col items-center justify-center p-4">
+                  <div className="flex flex-col items-center gap-2 text-center select-none z-10">
+                    <div className="relative">
+                      <img src={liveDocData?.coHostAvatar} className="w-16 h-16 rounded-full object-cover border-2 border-cyan-400 shadow-xl" />
+                      <span className="absolute -bottom-1 -right-1 bg-cyan-400 p-1.5 rounded-full text-black">
+                        <Mic size={10} />
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-black tracking-tight text-cyan-400">@{liveDocData?.coHostName}</h3>
+                      <p className="text-[9px] text-zinc-400">En direct avec le micro</p>
+                    </div>
+                    <div className="flex gap-1 items-center justify-center h-4 mt-1">
+                      <span className="w-1 h-4 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                      <span className="w-1 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+                      <span className="w-1 h-3 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0.5s' }} />
+                    </div>
+                  </div>
+                  
+                  {/* Option to stop speaker */}
+                  <button
+                    onClick={async () => {
+                      await updateDoc(doc(db, 'lives', liveDocData.id), {
+                        coHostId: null,
+                        coHostName: null,
+                        coHostAvatar: null,
+                        coHostStatus: 'none'
+                      });
+                    }}
+                    className="absolute bottom-2 right-2 px-2.5 py-1.5 bg-rose-650 hover:bg-rose-700 text-white text-[8px] font-black uppercase tracking-wider rounded-lg shadow"
+                  >
+                    Couper parole
+                  </button>
+                </div>
               </div>
             ) : (
-              /* Actual streamer camera stream rendering */
-              <video
-                ref={streamerVideoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover transform -scale-x-100"
-              />
+              /* Normal single broadcaster layout */
+              cameraError ? (
+                <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-rose-950/40 to-indigo-950/40 flex flex-col items-center justify-center p-6 text-center">
+                  <div className="relative mb-5">
+                    <div className="w-24 h-24 rounded-full border border-rose-500 bg-rose-500/10 flex items-center justify-center scale-110">
+                      <Radio size={40} className="text-rose-400 animate-pulse" />
+                    </div>
+                    <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full animate-ping" />
+                  </div>
+                  <p className="text-xs font-black uppercase tracking-wider text-rose-400">Diffusion active</p>
+                  <h4 className="text-sm font-bold text-white mt-1 max-w-xs">{streamTitle}</h4>
+                  <p className="text-[10px] text-zinc-500 mt-1">Votre flux audio micro est diffusé en direct.</p>
+                </div>
+              ) : (
+                <video
+                  ref={streamerVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover transform -scale-x-100"
+                />
+              )
             )}
           </div>
 
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/60 pointer-events-none z-10" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/20 to-black/65 pointer-events-none z-10" />
 
           {/* Top panel (Broadcaster indicators) */}
           <div className="relative p-4 flex items-center justify-between z-20 bg-gradient-to-b from-black/50 to-transparent">
@@ -842,7 +1187,7 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
               </span>
               <div className="text-left bg-black/40 backdrop-blur-sm px-3 py-1 rounded-lg border border-white/5 truncate max-w-[150px]">
                 <p className="text-[10px] font-bold text-white truncate">{streamTitle}</p>
-                <p className="text-[8px] text-rose-400 font-bold uppercase">{streamCategory}</p>
+                <p className="text-[8px] text-rose-450 font-bold uppercase">{streamCategory}</p>
               </div>
             </div>
 
