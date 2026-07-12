@@ -331,37 +331,63 @@ export async function uploadCustomVideo(
 
 // Upload large videos in chunks to avoid Firestore document size limits
 export async function uploadCustomVideoChunks(videoId: string, file: File | Blob): Promise<void> {
-  const CHUNK_SIZE = 400 * 1024; // 400 KB base binary chunks
+  const CHUNK_SIZE = 650 * 1024; // 650 KB base binary chunks (Base64 size ~866 KB, safely under 1 MB limit)
   const totalSize = file.size;
   let offset = 0;
   let chunkIndex = 0;
 
+  // First, slice and prepare all chunks
+  const chunksToUpload: { index: number; slice: Blob }[] = [];
   while (offset < totalSize) {
-    const slice = file.slice(offset, offset + CHUNK_SIZE);
-    
-    // Convert slice to base64
-    const base64Data = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const resultStr = reader.result as string;
-        // Strip dataUrl prefix: e.g. "data:video/mp4;base64,"
-        const base64 = resultStr.substring(resultStr.indexOf(',') + 1);
-        resolve(base64);
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(slice);
+    chunksToUpload.push({
+      index: chunkIndex,
+      slice: file.slice(offset, offset + CHUNK_SIZE)
     });
-
-    // Write chunk document to Firestore chunks subcollection
-    const chunkDocRef = doc(db, 'videos', videoId, 'chunks', String(chunkIndex));
-    await setDoc(chunkDocRef, {
-      videoId,
-      chunkIndex,
-      data: base64Data
-    });
-
     offset += CHUNK_SIZE;
     chunkIndex++;
+  }
+
+  // Upload chunks in parallel batches of 4 for maximum performance and stability
+  const BATCH_SIZE = 4;
+  for (let i = 0; i < chunksToUpload.length; i += BATCH_SIZE) {
+    const batch = chunksToUpload.slice(i, i + BATCH_SIZE);
+    
+    await Promise.all(batch.map(async (chunk) => {
+      // Convert slice to base64
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const resultStr = reader.result as string;
+          // Strip dataUrl prefix: e.g. "data:video/mp4;base64,"
+          const base64 = resultStr.substring(resultStr.indexOf(',') + 1);
+          resolve(base64);
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(chunk.slice);
+      });
+
+      // Write chunk document to Firestore chunks subcollection with automatic retry
+      const chunkDocRef = doc(db, 'videos', videoId, 'chunks', String(chunk.index));
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          await setDoc(chunkDocRef, {
+            videoId,
+            chunkIndex: chunk.index,
+            data: base64Data
+          });
+          break; // Success
+        } catch (err) {
+          retries--;
+          if (retries === 0) {
+            console.error(`Error uploading video chunk index ${chunk.index} after all retries:`, err);
+            throw err;
+          }
+          // Wait 1 second before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    }));
   }
 }
 

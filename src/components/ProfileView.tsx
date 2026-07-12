@@ -24,7 +24,8 @@ import {
   Link as LinkIcon
 } from 'lucide-react';
 import { User as FirebaseUser, signOut } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { 
   getUserProfile, 
   updateUserProfileDetails, 
@@ -115,6 +116,7 @@ function ProfileVideoThumbnail({ video }: { video: Video }) {
       src={resolvedUrl} 
       className="w-full h-full object-cover"
       preload="metadata"
+      referrerPolicy="no-referrer"
       muted
     />
   );
@@ -138,6 +140,8 @@ export default function ProfileView({
   const [isFollowing, setIsFollowing] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [realFollowersCount, setRealFollowersCount] = useState<number | null>(null);
+  const [realFollowingCount, setRealFollowingCount] = useState<number | null>(null);
 
   // Tab systems
   const [activeTab, setActiveTab] = useState<TabType>('publications');
@@ -243,6 +247,30 @@ export default function ProfileView({
       unsubscribeVideos();
     };
   }, [profileId, isOwnProfile, currentUserProfile]);
+
+  // Listen to real-time followers and following count from follows collection
+  useEffect(() => {
+    if (!profileId) return;
+
+    const qFollowers = query(collection(db, 'follows'), where('followingId', '==', profileId));
+    const unsubscribeFollowers = onSnapshot(qFollowers, (snapshot) => {
+      setRealFollowersCount(snapshot.size);
+    }, (err) => {
+      console.error("Error listening to real-time followers count:", err);
+    });
+
+    const qFollowing = query(collection(db, 'follows'), where('followerId', '==', profileId));
+    const unsubscribeFollowing = onSnapshot(qFollowing, (snapshot) => {
+      setRealFollowingCount(snapshot.size);
+    }, (err) => {
+      console.error("Error listening to real-time following count:", err);
+    });
+
+    return () => {
+      unsubscribeFollowers();
+      unsubscribeFollowing();
+    };
+  }, [profileId]);
 
   // Sync tab data on change
   useEffect(() => {
@@ -527,7 +555,7 @@ export default function ProfileView({
                 onClick={() => setActiveTab('following')}
                 className={`flex flex-col items-center transition-colors ${activeTab === 'following' ? 'text-rose-400' : 'text-zinc-300 hover:text-white'}`}
               >
-                <span className="text-lg font-black">{profile.followingCount}</span>
+                <span className="text-lg font-black">{realFollowingCount !== null ? realFollowingCount : (profile.followingCount || 0)}</span>
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Abonnements</span>
               </button>
               <div className="h-6 w-px bg-zinc-800/80" />
@@ -535,7 +563,7 @@ export default function ProfileView({
                 onClick={() => setActiveTab('followers')}
                 className={`flex flex-col items-center transition-colors ${activeTab === 'followers' ? 'text-rose-400' : 'text-zinc-300 hover:text-white'}`}
               >
-                <span className="text-lg font-black">{profile.followersCount}</span>
+                <span className="text-lg font-black">{realFollowersCount !== null ? realFollowersCount : (profile.followersCount || 0)}</span>
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">Abonnés</span>
               </button>
             </div>
@@ -767,12 +795,7 @@ export default function ProfileView({
                         onClick={() => onSelectVideo(vid.id)}
                         className="aspect-[9/16] bg-zinc-900 rounded-xl overflow-hidden relative cursor-pointer hover:opacity-80 hover:scale-[1.02] transition-all border border-zinc-800 shadow-md group"
                       >
-                        <video 
-                          src={vid.videoUrl} 
-                          className="w-full h-full object-cover"
-                          preload="metadata"
-                          muted
-                        />
+                        <ProfileVideoThumbnail video={vid} />
                         <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-colors" />
                         <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold text-white drop-shadow flex items-center gap-0.5">
                           ♥ {vid.likesCount}

@@ -289,6 +289,7 @@ export default function VideoCard({
         loop
         playsInline
         webkit-playsinline="true"
+        referrerPolicy="no-referrer"
         onClick={handlePlayPause}
         onLoadedData={() => setVideoLoaded(true)}
         className="w-full h-full object-cover cursor-pointer"
