@@ -33,6 +33,7 @@ import UploadModal from './components/UploadModal';
 import InboxView from './components/InboxView';
 import ProfileView from './components/ProfileView';
 import PreferencesModal from './components/PreferencesModal';
+import LiveView from './components/LiveView';
 
 export default function App() {
   // Authentication states
@@ -58,6 +59,7 @@ export default function App() {
   // Modals state
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showPreferencesModal, setShowPreferencesModal] = useState(false);
+  const [showLiveView, setShowLiveView] = useState(false);
 
   // Following list to filter following feed
   const [followingIds, setFollowingIds] = useState<string[]>([]);
@@ -352,14 +354,15 @@ export default function App() {
 
             {/* Top Navigation Tabs (For You / Following) */}
             <div className="absolute top-0 inset-x-0 py-4 px-6 flex items-center justify-between z-30 bg-gradient-to-b from-black/60 to-transparent">
-              {/* Left filter toggle */}
+              {/* Left Live launcher button */}
               <button 
-                onClick={() => setShowPreferencesModal(true)}
-                className="p-2.5 bg-black/40 hover:bg-black/60 active:bg-rose-500/10 rounded-full transition-all border border-white/15 backdrop-blur-md text-white shadow-lg shrink-0"
-                id="filter-pref-launcher"
-                title="Filtrer mes préférences"
+                onClick={() => setShowLiveView(true)}
+                className="px-3.5 py-2 bg-rose-500 hover:bg-rose-600 hover:scale-105 active:scale-95 text-[11px] font-black tracking-wider uppercase rounded-full transition-all border border-rose-400/20 backdrop-blur-md text-white shadow-lg shrink-0 flex items-center gap-1.5"
+                id="live-launcher-btn"
+                title="Regarder ou lancer un Live"
               >
-                <SlidersHorizontal size={16} className="text-white" />
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                <span>Live</span>
               </button>
 
               {/* Feed Mode Selectors */}
@@ -405,36 +408,7 @@ export default function App() {
               </button>
             </div>
 
-            {/* Horizontal Video Category Quick Toggles (Only on For You feed) */}
-            {feedType === 'foryou' && (
-              <div className="absolute top-16 inset-x-0 px-4 py-3 flex gap-2 overflow-x-auto scrollbar-none z-30">
-                {['all', 'comedy', 'tech', 'music', 'sports', 'food', 'nature'].map((cat) => {
-                  const labelMap: Record<string, string> = {
-                    all: "Tous 🌌",
-                    comedy: "Humour 🎭",
-                    tech: "Tech 💻",
-                    music: "Musique 🎧",
-                    sports: "Sports 🛹",
-                    food: "Food 🍔",
-                    nature: "Nature 🌲"
-                  };
-                  const isSelected = selectedCategory === cat;
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedCategory(cat)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all shadow-md shrink-0 border ${
-                        isSelected 
-                          ? 'bg-rose-500 text-white border-rose-500 scale-105' 
-                          : 'bg-black/40 hover:bg-black/60 border-white/10 text-zinc-300 backdrop-blur-md'
-                      }`}
-                    >
-                      {labelMap[cat]}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+
 
             {/* Vertical Video Scroll Feed */}
             {filteredVideos.length === 0 ? (
@@ -631,6 +605,16 @@ export default function App() {
               onClose={() => setShowPreferencesModal(false)}
               currentUserProfile={currentUserProfile}
               onSaveSuccess={handlePreferencesSaved}
+            />
+          )}
+
+          {showLiveView && (
+            <LiveView
+              isOpen={showLiveView}
+              onClose={() => setShowLiveView(false)}
+              currentUser={currentUser}
+              currentUserProfile={currentUserProfile}
+              onRequireAuth={handleRequireAuth}
             />
           )}
         </AnimatePresence>

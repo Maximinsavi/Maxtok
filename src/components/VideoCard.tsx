@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Heart, MessageCircle, Share2, Music2, Volume2, VolumeX, Play, Pause, Edit3, Trash2, Save, X } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Music2, Volume2, VolumeX, Play, Pause, Edit3, Trash2, Save, X, MoreHorizontal, Download } from 'lucide-react';
 import { Video, UserProfile } from '../types';
 import { User } from 'firebase/auth';
 import { listenToLike, toggleLikeVideo, listenToFollow, toggleFollowUser, getUserProfile, getVideoFromLocalDB, getVideoChunks, listenToUserProfile, updateVideo, deleteVideo } from '../dbUtils';
@@ -48,6 +48,52 @@ export default function VideoCard({
   const [editSongName, setEditSongName] = useState(video.songName);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showOptionsDropdown, setShowOptionsDropdown] = useState(false);
+
+  const handleDownloadVideo = async () => {
+    try {
+      const videoSrc = resolvedUrl || video.videoUrl;
+      if (!videoSrc) {
+        alert("L'URL de la vidéo n'est pas encore prête.");
+        return;
+      }
+      
+      if (videoSrc.startsWith('blob:')) {
+        const link = document.createElement('a');
+        link.href = videoSrc;
+        link.download = `video-${video.id}.mp4`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+      
+      if (videoSrc.startsWith('data:')) {
+        const link = document.createElement('a');
+        link.href = videoSrc;
+        link.download = `video-${video.id}.mp4`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      const response = await fetch(videoSrc);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `video-${video.id}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error("Error downloading video:", err);
+      const videoSrc = resolvedUrl || video.videoUrl;
+      window.open(videoSrc, '_blank');
+    }
+  };
 
   const displayAvatar = creatorProfile?.photoURL || video.creatorAvatar;
   const displayName = creatorProfile?.displayName || video.creatorName;
@@ -439,14 +485,14 @@ export default function VideoCard({
         <div className="flex flex-col items-center">
           <button 
             onClick={handleLikeClick}
-            className={`p-3 rounded-full backdrop-blur-md border border-white/5 shadow-lg active:scale-90 transition-all ${
+            className={`p-2.5 rounded-full backdrop-blur-md border border-white/5 shadow-lg active:scale-90 transition-all ${
               isLiked ? 'bg-rose-500/20 text-rose-500' : 'bg-black/40 text-white'
             }`}
             id={`like-btn-${video.id}`}
           >
-            <Heart size={22} className={isLiked ? 'fill-rose-500' : ''} />
+            <Heart size={19} className={isLiked ? 'fill-rose-500' : ''} />
           </button>
-          <span className="text-white text-xs font-semibold mt-1 drop-shadow-md">
+          <span className="text-white text-[11px] font-semibold mt-1 drop-shadow-md">
             {video.likesCount}
           </span>
         </div>
@@ -458,12 +504,12 @@ export default function VideoCard({
               e.stopPropagation();
               setShowComments(true);
             }}
-            className="p-3 bg-black/40 hover:bg-black/60 rounded-full text-white backdrop-blur-md border border-white/5 shadow-lg active:scale-90 transition-all"
+            className="p-2.5 bg-black/40 hover:bg-black/60 rounded-full text-white backdrop-blur-md border border-white/5 shadow-lg active:scale-90 transition-all"
             id={`comments-toggle-btn-${video.id}`}
           >
-            <MessageCircle size={22} />
+            <MessageCircle size={19} />
           </button>
-          <span className="text-white text-xs font-semibold mt-1 drop-shadow-md">
+          <span className="text-white text-[11px] font-semibold mt-1 drop-shadow-md">
             {video.commentsCount}
           </span>
         </div>
@@ -472,12 +518,12 @@ export default function VideoCard({
         <div className="flex flex-col items-center">
           <button 
             onClick={handleShareClick}
-            className="p-3 bg-black/40 hover:bg-black/60 rounded-full text-white backdrop-blur-md border border-white/5 shadow-lg active:scale-90 transition-all"
+            className="p-2.5 bg-black/40 hover:bg-black/60 rounded-full text-white backdrop-blur-md border border-white/5 shadow-lg active:scale-90 transition-all"
             id={`share-btn-${video.id}`}
           >
-            <Share2 size={22} />
+            <Share2 size={19} />
           </button>
-          <span className="text-white text-xs font-semibold mt-1 drop-shadow-md">
+          <span className="text-white text-[11px] font-semibold mt-1 drop-shadow-md">
             {video.sharesCount}
           </span>
         </div>
@@ -492,13 +538,13 @@ export default function VideoCard({
                   e.stopPropagation();
                   setIsEditing(true);
                 }}
-                className="p-3 bg-rose-500 hover:bg-rose-600 rounded-full text-white backdrop-blur-md border border-rose-400/20 shadow-lg active:scale-90 transition-all"
+                className="p-2.5 bg-rose-500 hover:bg-rose-600 rounded-full text-white backdrop-blur-md border border-rose-400/20 shadow-lg active:scale-90 transition-all"
                 id={`edit-video-btn-${video.id}`}
                 title="Modifier les détails"
               >
-                <Edit3 size={22} />
+                <Edit3 size={19} />
               </button>
-              <span className="text-white text-[10px] font-bold mt-1 drop-shadow-md uppercase tracking-wider">
+              <span className="text-white text-[9px] font-bold mt-1 drop-shadow-md uppercase tracking-wider">
                 Modifier
               </span>
             </div>
@@ -510,24 +556,78 @@ export default function VideoCard({
                   e.stopPropagation();
                   handleDeleteVideo();
                 }}
-                className="p-3 bg-zinc-900/80 hover:bg-red-600/90 rounded-full text-zinc-300 hover:text-white backdrop-blur-md border border-white/5 shadow-lg active:scale-90 transition-all"
+                className="p-2.5 bg-zinc-900/80 hover:bg-red-600/90 rounded-full text-zinc-300 hover:text-white backdrop-blur-md border border-white/5 shadow-lg active:scale-90 transition-all"
                 id={`delete-video-btn-${video.id}`}
                 title="Supprimer la vidéo"
               >
-                <Trash2 size={22} />
+                <Trash2 size={19} />
               </button>
-              <span className="text-zinc-400 text-[10px] font-bold mt-1 drop-shadow-md uppercase tracking-wider">
+              <span className="text-zinc-400 text-[9px] font-bold mt-1 drop-shadow-md uppercase tracking-wider">
                 Supprimer
               </span>
             </div>
           </>
         )}
 
-        {/* Rotating Music Disc */}
-        <div className="w-10 h-10 mt-2 rounded-full border border-zinc-700 bg-zinc-950 flex items-center justify-center animate-[spin_5s_linear_infinite] overflow-hidden shadow-xl">
-          <div className="w-4 h-4 rounded-full bg-rose-500 flex items-center justify-center">
-            <div className="w-1.5 h-1.5 rounded-full bg-black" />
-          </div>
+        {/* 3-dots option dropdown */}
+        <div className="relative">
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowOptionsDropdown(!showOptionsDropdown);
+            }}
+            className="p-2.5 bg-black/40 hover:bg-black/60 text-white rounded-full backdrop-blur-md border border-white/5 shadow-lg active:scale-90 transition-all mt-1"
+            id={`options-btn-${video.id}`}
+            title="Plus d'options"
+          >
+            <MoreHorizontal size={19} />
+          </button>
+          
+          <AnimatePresence>
+            {showOptionsDropdown && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40 cursor-default" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowOptionsDropdown(false);
+                  }}
+                />
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, x: -10 }}
+                  animate={{ opacity: 1, scale: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, x: -10 }}
+                  className="absolute right-0 bottom-12 w-40 bg-zinc-950/95 border border-zinc-800/80 rounded-xl p-1.5 shadow-2xl z-50 backdrop-blur-md flex flex-col text-left"
+                >
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowOptionsDropdown(false);
+                      handleDownloadVideo();
+                    }}
+                    className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs font-semibold text-zinc-200 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors"
+                  >
+                    <Download size={14} className="text-rose-400" />
+                    <span>Télécharger</span>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowOptionsDropdown(false);
+                      const shareUrl = `${window.location.origin}?video=${video.id}`;
+                      navigator.clipboard.writeText(shareUrl)
+                        .then(() => alert("Lien de la vidéo copié !"))
+                        .catch(() => alert("Impossible de copier le lien."));
+                    }}
+                    className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs font-semibold text-zinc-200 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors"
+                  >
+                    <Share2 size={14} className="text-rose-400" />
+                    <span>Copier le lien</span>
+                  </button>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
