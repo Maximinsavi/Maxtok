@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   signInWithPopup, 
   createUserWithEmailAndPassword, 
@@ -70,25 +70,64 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
     }
   };
 
-  const handleGoogleSignIn = async () => {
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+
+      if (event.data?.type === 'FIREBASE_AUTH_SUCCESS') {
+        setIsLoading(true);
+        try {
+          const userData = event.data.user;
+          // Synchronize/Create user profile in Firestore
+          await createOrUpdateUser({
+            uid: userData.uid,
+            displayName: userData.displayName,
+            email: userData.email,
+            photoURL: userData.photoURL
+          });
+          
+          if (onSuccess) onSuccess();
+          onClose();
+          
+          // Force page reload so that all components read the newly synchronized Auth state from IndexedDB/Storage
+          window.location.reload();
+        } catch (err) {
+          console.error("Error synchronizing Google session:", err);
+          setError("Erreur lors de la synchronisation de la session.");
+          setIsLoading(false);
+        }
+      } else if (event.data?.type === 'FIREBASE_AUTH_ERROR') {
+        setError(event.data.error || "Une erreur s'est produite lors de la connexion Google.");
+        setIsLoading(false);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [isOpen, onSuccess, onClose]);
+
+  const handleGoogleSignIn = () => {
     setError('');
     setIsLoading(true);
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      if (result.user) {
-        await createOrUpdateUser({
-          uid: result.user.uid,
-          displayName: result.user.displayName,
-          email: result.user.email,
-          photoURL: result.user.photoURL
-        });
-        if (onSuccess) onSuccess();
-        onClose();
-      }
-    } catch (err: any) {
-      console.error("Error signing in with Google:", err);
-      setError(getFriendlyErrorMessage(err));
-    } finally {
+    
+    // Open same-origin popup which runs at the top-level (bypassing cross-origin iframe blocks)
+    const popupWidth = 500;
+    const popupHeight = 650;
+    const left = window.screen.width / 2 - popupWidth / 2;
+    const top = window.screen.height / 2 - popupHeight / 2;
+    
+    const popup = window.open(
+      '/auth-popup.html',
+      'firebase_google_auth',
+      `width=${popupWidth},height=${popupHeight},top=${top},left=${left},scrollbars=yes,status=yes`
+    );
+    
+    if (!popup) {
+      setError("Le pop-up de connexion Google a été bloqué par votre navigateur. Veuillez autoriser les pop-ups pour ce site.");
       setIsLoading(false);
     }
   };

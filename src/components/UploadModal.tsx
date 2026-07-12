@@ -11,122 +11,6 @@ interface UploadModalProps {
   onUploadSuccess: () => void;
 }
 
-// Function to automatically slice/trim the video to 30 seconds if it exceeds the limit
-async function trimVideoIfNeeded(file: File, maxDuration: number = 30): Promise<{ blob: Blob | File; trimmed: boolean }> {
-  return new Promise((resolve) => {
-    const video = document.createElement('video');
-    video.preload = 'metadata';
-    video.muted = true;
-    video.playsInline = true;
-    const objectUrl = URL.createObjectURL(file);
-    video.src = objectUrl;
-
-    const cleanup = () => {
-      try {
-        video.pause();
-        video.src = '';
-        video.load();
-        URL.revokeObjectURL(objectUrl);
-      } catch (err) {
-        console.error("Error during cleanup of video object:", err);
-      }
-    };
-
-    video.onloadedmetadata = () => {
-      const duration = video.duration;
-      if (!duration || duration <= maxDuration) {
-        cleanup();
-        resolve({ blob: file, trimmed: false });
-        return;
-      }
-
-      console.log(`Video duration ${duration}s exceeds limit of ${maxDuration}s. Trimming automatically...`);
-      
-      let stream: MediaStream;
-      try {
-        if ((video as any).captureStream) {
-          stream = (video as any).captureStream();
-        } else if ((video as any).mozCaptureStream) {
-          stream = (video as any).mozCaptureStream();
-        } else {
-          cleanup();
-          resolve({ blob: file, trimmed: false });
-          return;
-        }
-      } catch (err) {
-        console.error("Failed to capture video stream:", err);
-        cleanup();
-        resolve({ blob: file, trimmed: false });
-        return;
-      }
-
-      let options = { mimeType: 'video/webm;codecs=vp9' };
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = { mimeType: 'video/webm;codecs=vp8' };
-      }
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = { mimeType: 'video/webm' };
-      }
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = { mimeType: 'video/mp4' };
-      }
-
-      let mediaRecorder: MediaRecorder;
-      try {
-        mediaRecorder = new MediaRecorder(stream, MediaRecorder.isTypeSupported(options.mimeType) ? options : undefined);
-      } catch (err) {
-        try {
-          mediaRecorder = new MediaRecorder(stream);
-        } catch (err2) {
-          cleanup();
-          resolve({ blob: file, trimmed: false });
-          return;
-        }
-      }
-
-      const chunks: Blob[] = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          chunks.push(e.data);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        const trimmedBlob = new Blob(chunks, { type: 'video/mp4' });
-        cleanup();
-        resolve({ blob: trimmedBlob, trimmed: true });
-      };
-
-      video.currentTime = 0;
-      video.play()
-        .then(() => {
-          mediaRecorder.start(100);
-          
-          setTimeout(() => {
-            try {
-              if (mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-              }
-            } catch (err) {
-              cleanup();
-              resolve({ blob: file, trimmed: false });
-            }
-          }, maxDuration * 1000);
-        })
-        .catch((err) => {
-          console.error("Error playing video for stream capture:", err);
-          cleanup();
-          resolve({ blob: file, trimmed: false });
-        });
-    };
-
-    video.onerror = () => {
-      cleanup();
-      resolve({ blob: file, trimmed: false });
-    };
-  });
-}
-
 export default function UploadModal({ isOpen, onClose, currentUser, onUploadSuccess }: UploadModalProps) {
   const [videoUrl, setVideoUrl] = useState('');
   const [description, setDescription] = useState('');
@@ -202,42 +86,10 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
     }
 
     setIsUploading(true);
-    setUploadStep('trimming');
+    setUploadStep('uploading');
     try {
-      let fileToUpload: File | Blob = selectedFile;
-      let finalVideoUrl = videoUrl;
-
-      // 1. Process video trimming automatically if duration is over 30s
-      const trimResult = await trimVideoIfNeeded(selectedFile, 30);
-      fileToUpload = trimResult.blob;
-
-      if (trimResult.trimmed) {
-        console.log("Video exceeded limit and was trimmed successfully. New file size:", fileToUpload.size);
-        const trimmedMB = fileToUpload.size / (1024 * 1024);
-        
-        // Re-calculate if the trimmed blob can fit under the 750 KB limit for simple base64,
-        // or if it still requires chunked storage
-        if (fileToUpload.size <= 768000) {
-          const base64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              if (typeof reader.result === 'string') {
-                resolve(reader.result);
-              } else {
-                reject(new Error("Invalid file result"));
-              }
-            };
-            reader.onerror = () => reject(reader.error);
-            reader.readAsDataURL(fileToUpload);
-          });
-          finalVideoUrl = base64;
-        } else {
-          const uniqueId = 'v_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-          finalVideoUrl = 'chunked://' + uniqueId;
-        }
-      }
-
-      setUploadStep('uploading');
+      const fileToUpload: File | Blob = selectedFile;
+      const finalVideoUrl = videoUrl;
 
       let customId: string | undefined;
       if (finalVideoUrl.startsWith('chunked://')) {
@@ -358,7 +210,7 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
                 <div className="flex items-start gap-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-[11px] leading-relaxed">
                   <Info size={14} className="shrink-0 mt-0.5" />
                   <span>
-                    <strong>Découpage & Optimisation :</strong> Si cette vidéo dépasse 30 secondes, elle sera automatiquement découpée à 30s avant d'être publiée pour garantir une lecture fluide pour tous !
+                    <strong>Optimisation automatique :</strong> Si cette vidéo dépasse 750 Ko, elle sera découpée automatiquement en morceaux optimisés de 750 Ko ou moins pour assurer un stockage sécurisé et stable, puis réassemblée de manière transparente lors de la lecture.
                   </span>
                 </div>
               </div>
@@ -440,7 +292,7 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
               {isUploading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                  {uploadStep === 'trimming' ? "Découpage (limite 30s)..." : "Publication..."}
+                  Publication...
                 </>
               ) : (
                 <>

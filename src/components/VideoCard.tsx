@@ -213,6 +213,17 @@ export default function VideoCard({
     }
   };
 
+  const lastClickTimeRef = useRef<number>(0);
+  const clickTimeoutRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const handlePlayPause = () => {
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -229,6 +240,48 @@ export default function VideoCard({
         setTimeout(() => setShowPlayOverlay(false), 800);
       });
     }
+  };
+
+  const handleVideoClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const currentTime = Date.now();
+    const timeDiff = currentTime - lastClickTimeRef.current;
+
+    if (timeDiff < 300) {
+      // Double tap detected!
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+        clickTimeoutRef.current = null;
+      }
+      
+      // Show heart animation immediately for responsive UI feedback
+      setShowHeartAnimation(true);
+      setTimeout(() => setShowHeartAnimation(false), 800);
+
+      if (!currentUser) {
+        onRequireAuth();
+        return;
+      }
+
+      // If not liked already, toggle like to liked
+      if (!isLiked) {
+        try {
+          await toggleLikeVideo(video, currentUser.uid, false);
+        } catch (err) {
+          console.error("Error liking video via double-tap:", err);
+        }
+      }
+    } else {
+      // Single tap
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+      }
+      clickTimeoutRef.current = setTimeout(() => {
+        handlePlayPause();
+        clickTimeoutRef.current = null;
+      }, 300);
+    }
+    lastClickTimeRef.current = currentTime;
   };
 
   const handleLikeClick = async (e: React.MouseEvent) => {
@@ -290,7 +343,7 @@ export default function VideoCard({
         playsInline
         webkit-playsinline="true"
         referrerPolicy="no-referrer"
-        onClick={handlePlayPause}
+        onClick={handleVideoClick}
         onLoadedData={() => setVideoLoaded(true)}
         className="w-full h-full object-cover cursor-pointer"
         id={`video-player-${video.id}`}
