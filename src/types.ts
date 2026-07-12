@@ -25,6 +25,11 @@ export interface Video {
   sharesCount: number;
   createdAt: string;
   mimeType?: string;
+  // Video editing properties (crop, zoom, styling)
+  cropRatio?: '9:16' | '16:9' | '1:1' | 'none';
+  zoomScale?: number; // 1.0 to 2.0
+  translateY?: number; // -100 to 100 pixels
+  visualFilter?: 'none' | 'grayscale' | 'sepia' | 'contrast' | 'invert' | 'blur';
 }
 
 export interface Comment {

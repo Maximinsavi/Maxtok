@@ -130,6 +130,36 @@
         "data": { "type": "string" }
       },
       "required": ["videoId", "chunkIndex", "data"]
+    },
+    "LiveStream": {
+      "title": "LiveStream",
+      "description": "A live broadcast stream instance.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "streamerId": { "type": "string" },
+        "streamerName": { "type": "string" },
+        "streamerAvatar": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "viewerCount": { "type": "integer" },
+        "bgGradient": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "ended"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "streamerId", "streamerName", "title", "category", "viewerCount", "status", "createdAt"]
+    },
+    "LiveChatMessage": {
+      "title": "LiveChatMessage",
+      "description": "A message sent in a live stream chat room.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "username", "text", "createdAt"]
     }
   },
   "firestore": {
@@ -168,6 +198,14 @@
     "/users/{userId}/notifications/{notificationId}": {
       "schema": "Notification",
       "description": "Activity alerts/notifications for users."
+    },
+    "/lives/{liveId}": {
+      "schema": "LiveStream",
+      "description": "Current and historic live streams."
+    },
+    "/lives/{liveId}/chat/{chatMessageId}": {
+      "schema": "LiveChatMessage",
+      "description": "Live stream chat feed messages."
     }
   }
 }

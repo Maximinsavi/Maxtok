@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { User } from 'firebase/auth';
+import { db } from '../firebase';
+import { collection, doc, setDoc, updateDoc, onSnapshot, query, where, orderBy, deleteDoc } from 'firebase/firestore';
 
 interface LiveStream {
   id: string;
@@ -118,6 +120,39 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
   const [selectedLive, setSelectedLive] = useState<LiveStream | null>(null);
   const [viewerCount, setViewerCount] = useState(0);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  
+  // Real lives from Firestore
+  const [realLives, setRealLives] = useState<LiveStream[]>([]);
+  const [currentLiveId, setCurrentLiveId] = useState<string | null>(null);
+
+  // Subscribe to real-time active lives in Firestore
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const livesRef = collection(db, 'lives');
+    const q = query(livesRef, where('status', '==', 'active'), orderBy('createdAt', 'desc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const livesList: LiveStream[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        livesList.push({
+          id: docSnap.id,
+          streamerName: data.streamerName || 'Streamer',
+          streamerAvatar: data.streamerAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+          title: data.title || 'Live sans titre',
+          category: data.category || 'Général',
+          viewerCount: data.viewerCount || 0,
+          bgGradient: data.bgGradient || 'from-zinc-800 to-black',
+        } as any);
+      });
+      setRealLives(livesList);
+    }, (err) => {
+      console.error("Error listening to lives:", err);
+    });
+
+    return () => unsubscribe();
+  }, [isOpen]);
   const [inputText, setInputText] = useState('');
   const [hearts, setHearts] = useState<FloatingHeart[]>([]);
   const heartIdCounterRef = useRef(0);
@@ -165,46 +200,76 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
     if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
   };
 
+  // Subscribe to real-time chat messages for the current live stream
+  useEffect(() => {
+    const liveId = selectedLive?.id || currentLiveId;
+    if ((activeScreen === 'viewer' || activeScreen === 'streamer') && liveId) {
+      const chatRef = collection(db, 'lives', liveId, 'chat');
+      const q = query(chatRef, orderBy('createdAt', 'asc'));
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const messages: ChatMessage[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const myName = currentUserProfile?.displayName || currentUser?.email?.split('@')[0] || "Moi";
+          messages.push({
+            id: docSnap.id,
+            username: data.username,
+            text: data.text,
+            isMe: data.username === myName
+          });
+        });
+        setChatMessages(messages.slice(-50)); // Keep last 50
+      }, (err) => {
+        console.error("Error listening to live chat:", err);
+      });
+
+      return () => unsubscribe();
+    }
+  }, [activeScreen, selectedLive?.id, currentLiveId, currentUserProfile?.displayName, currentUser?.email]);
+
   // 1. WATCHING A LIVE STREAM
-  const handleJoinLive = (live: LiveStream) => {
+  const handleJoinLive = async (live: LiveStream) => {
     setSelectedLive(live);
     setViewerCount(live.viewerCount);
-    
-    // Initial welcome messages
-    setChatMessages([
-      { id: '1', username: 'Système 🤖', text: `Bienvenue dans le Live de @${live.streamerName.split(' ')[0]} ! Respectez les règles de la communauté.` },
-      { id: '2', username: SIMULATED_USERNAMES[0], text: 'Salut tout le monde ! 👋' },
-      { id: '3', username: SIMULATED_USERNAMES[1], text: 'Trop hâte !' }
-    ]);
-    
     setActiveScreen('viewer');
 
-    // Simulate viewers count fluctuation
+    const liveId = live.id;
+    // Add a real join action comment to the database so everyone sees!
+    if (currentUser) {
+      try {
+        const myName = currentUserProfile?.displayName || currentUser.email?.split('@')[0] || "Spectateur";
+        const msgId = 'join_' + Math.random().toString(36).substring(2, 9);
+        const chatRef = collection(db, 'lives', liveId, 'chat');
+        await setDoc(doc(chatRef, msgId), {
+          id: msgId,
+          username: myName,
+          text: 'a rejoint le live 👋',
+          createdAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error("Error writing join comment:", err);
+      }
+    }
+
+    // Still simulate viewer counts fluctuations occasionally for organic feel
     viewerIntervalRef.current = setInterval(() => {
       setViewerCount(prev => {
-        const delta = Math.floor(Math.random() * 21) - 10; // -10 to +10
-        return Math.max(10, prev + delta);
+        const delta = Math.floor(Math.random() * 9) - 4; // -4 to +4
+        const newCount = Math.max(1, prev + delta);
+        return newCount;
       });
-    }, 4000);
+    }, 5000);
 
-    // Simulate incoming chat messages
+    // Simulate casual external hearts occasionally so viewer feels standard Tik-Tok flow activity
     chatIntervalRef.current = setInterval(() => {
-      const randomUser = SIMULATED_USERNAMES[Math.floor(Math.random() * SIMULATED_USERNAMES.length)];
-      const randomText = SIMULATED_COMMENTS[Math.floor(Math.random() * SIMULATED_COMMENTS.length)];
-      
-      setChatMessages(prev => [
-        ...prev.slice(-30), // Keep last 30 messages
-        { id: Math.random().toString(), username: randomUser, text: randomText }
-      ]);
-
-      // Occasional random simulated hearts
       if (Math.random() > 0.4) {
         triggerFloatingHeart();
       }
-    }, 2000);
+    }, 3500);
   };
 
-  const handleSendChatMessage = (e: React.FormEvent) => {
+  const handleSendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
 
@@ -213,16 +278,25 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
       return;
     }
 
-    const myName = currentUserProfile?.displayName || currentUser.email?.split('@')[0] || "Moi";
-    const newMessage: ChatMessage = {
-      id: Math.random().toString(),
-      username: myName,
-      text: inputText,
-      isMe: true
-    };
+    const liveId = selectedLive?.id || currentLiveId;
+    if (!liveId) return;
 
-    setChatMessages(prev => [...prev, newMessage]);
-    setInputText('');
+    try {
+      const myName = currentUserProfile?.displayName || currentUser.email?.split('@')[0] || "Moi";
+      const msgId = 'msg_' + Math.random().toString(36).substring(2, 9);
+      
+      const chatRef = collection(db, 'lives', liveId, 'chat');
+      await setDoc(doc(chatRef, msgId), {
+        id: msgId,
+        username: myName,
+        text: inputText.trim(),
+        createdAt: new Date().toISOString()
+      });
+
+      setInputText('');
+    } catch (err) {
+      console.error("Failed to send real-time message:", err);
+    }
   };
 
   const triggerFloatingHeart = () => {
@@ -265,70 +339,138 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
     }
   };
 
-  const handleStartBroadcasting = () => {
+  const handleStartBroadcasting = async () => {
     if (!streamTitle.trim()) {
       alert("Veuillez saisir un titre pour votre Direct !");
       return;
     }
 
-    setActiveScreen('streamer');
-    setViewerCount(0);
-    setPeakViewers(0);
-    setTotalHeartsSent(0);
-    setStreamDuration(0);
-    
-    setChatMessages([
-      { id: 'start', username: 'Studio 🔴', text: 'Votre diffusion en direct commence ! Les spectateurs arrivent...' }
-    ]);
+    if (!currentUser) {
+      onRequireAuth();
+      return;
+    }
 
-    // Track duration of stream
-    durationIntervalRef.current = setInterval(() => {
-      setStreamDuration(prev => prev + 1);
-    }, 1000);
+    try {
+      const liveId = 'live_' + Math.random().toString(36).substring(2, 9);
+      const streamerName = currentUserProfile?.displayName || currentUserProfile?.username || currentUser.email?.split('@')[0] || "Streamer";
+      const streamerAvatar = currentUserProfile?.photoURL || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150";
 
-    // Gradual viewer count increase
-    let curViewers = 0;
-    viewerIntervalRef.current = setInterval(() => {
-      const joiners = Math.floor(Math.random() * 12) + 2;
-      curViewers += joiners;
-      setViewerCount(curViewers);
-      setPeakViewers(prev => Math.max(prev, curViewers));
+      const bgGradients = [
+        'from-pink-500 via-rose-500 to-orange-500',
+        'from-purple-600 via-indigo-700 to-blue-800',
+        'from-amber-500 via-orange-600 to-red-700',
+        'from-emerald-500 via-teal-600 to-cyan-700'
+      ];
+      const randomBg = bgGradients[Math.floor(Math.random() * bgGradients.length)];
 
-      // Simulate joins in chat
-      if (Math.random() > 0.3) {
+      const liveDocRef = doc(db, 'lives', liveId);
+      const newLive = {
+        id: liveId,
+        streamerId: currentUser.uid,
+        streamerName,
+        streamerAvatar,
+        title: streamTitle,
+        category: streamCategory,
+        viewerCount: 0,
+        bgGradient: randomBg,
+        status: 'active',
+        createdAt: new Date().toISOString()
+      };
+
+      await setDoc(liveDocRef, newLive);
+      setCurrentLiveId(liveId);
+      setSelectedLive(newLive as any);
+
+      // Also write an initial system message in the chat subcollection
+      const chatRef = collection(db, 'lives', liveId, 'chat');
+      const initialMessageId = 'init_msg';
+      await setDoc(doc(chatRef, initialMessageId), {
+        id: initialMessageId,
+        username: 'Studio 🔴',
+        text: 'Votre diffusion en direct commence ! Les spectateurs arrivent...',
+        createdAt: new Date().toISOString()
+      });
+
+      setActiveScreen('streamer');
+      setViewerCount(0);
+      setPeakViewers(0);
+      setTotalHeartsSent(0);
+      setStreamDuration(0);
+
+      // Track duration of stream
+      durationIntervalRef.current = setInterval(() => {
+        setStreamDuration(prev => prev + 1);
+      }, 1000);
+
+      let curViewers = 0;
+      viewerIntervalRef.current = setInterval(async () => {
+        const joiners = Math.floor(Math.random() * 12) + 2;
+        curViewers += joiners;
+        setViewerCount(curViewers);
+        setPeakViewers(prev => Math.max(prev, curViewers));
+
+        // Update viewer count in Firestore
+        try {
+          await updateDoc(doc(db, 'lives', liveId), { viewerCount: curViewers });
+        } catch (e) {
+          console.error(e);
+        }
+
+        // Simulate joins in chat by writing them to Firestore subcollection!
+        if (Math.random() > 0.3) {
+          const randomUser = SIMULATED_USERNAMES[Math.floor(Math.random() * SIMULATED_USERNAMES.length)];
+          const joinMsgId = 'join_' + Math.random().toString(36).substring(2, 9);
+          await setDoc(doc(chatRef, joinMsgId), {
+            id: joinMsgId,
+            username: randomUser,
+            text: "a rejoint le live 👋",
+            createdAt: new Date().toISOString()
+          });
+        }
+      }, 3500);
+
+      // Simulate audience reacting and chatting by writing comments to Firestore chat subcollection
+      chatIntervalRef.current = setInterval(async () => {
+        if (curViewers === 0) return;
         const randomUser = SIMULATED_USERNAMES[Math.floor(Math.random() * SIMULATED_USERNAMES.length)];
-        setChatMessages(prev => [
-          ...prev,
-          { id: Math.random().toString(), username: randomUser, text: "a rejoint le live 👋", isMe: false }
-        ]);
-      }
-    }, 2500);
+        const randomText = SIMULATED_COMMENTS[Math.floor(Math.random() * SIMULATED_COMMENTS.length)];
+        
+        const commentMsgId = 'msg_' + Math.random().toString(36).substring(2, 9);
+        await setDoc(doc(chatRef, commentMsgId), {
+          id: commentMsgId,
+          username: randomUser,
+          text: randomText,
+          createdAt: new Date().toISOString()
+        });
 
-    // Simulate audience reacting and chatting
-    chatIntervalRef.current = setInterval(() => {
-      if (curViewers === 0) return;
-      const randomUser = SIMULATED_USERNAMES[Math.floor(Math.random() * SIMULATED_USERNAMES.length)];
-      const randomText = SIMULATED_COMMENTS[Math.floor(Math.random() * SIMULATED_COMMENTS.length)];
-      
-      setChatMessages(prev => [
-        ...prev,
-        { id: Math.random().toString(), username: randomUser, text: randomText }
-      ]);
+        // Rain of hearts from viewers!
+        const heartCount = Math.floor(Math.random() * 4) + 1;
+        for (let i = 0; i < heartCount; i++) {
+          setTimeout(() => {
+            triggerFloatingHeart();
+            setTotalHeartsSent(prev => prev + 1);
+          }, i * 200);
+        }
+      }, 4000);
 
-      // Rain of hearts from viewers!
-      const heartCount = Math.floor(Math.random() * 4) + 1;
-      for (let i = 0; i < heartCount; i++) {
-        setTimeout(() => {
-          triggerFloatingHeart();
-          setTotalHeartsSent(prev => prev + 1);
-        }, i * 200);
-      }
-    }, 3000);
+    } catch (err) {
+      console.error("Failed to start direct stream:", err);
+      alert("Erreur lors du lancement du direct.");
+    }
   };
 
-  const handleEndBroadcasting = () => {
+  const handleEndBroadcasting = async () => {
     clearIntervals();
     stopCamera();
+
+    const liveId = currentLiveId;
+    if (liveId) {
+      try {
+        await updateDoc(doc(db, 'lives', liveId), { status: 'ended' });
+      } catch (e) {
+        console.error("Failed to end live stream:", e);
+      }
+    }
     setActiveScreen('streamer_summary');
   };
 
@@ -337,6 +479,8 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
     const secs = sec % 60;
     return `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
   };
+
+  const displayedLives = realLives;
 
   if (!isOpen) return null;
 
@@ -386,13 +530,13 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
           <div className="px-5 pb-2 pt-1">
             <h2 className="text-xs font-black uppercase tracking-widest text-zinc-500 flex items-center gap-2">
               <Radio size={12} className="text-rose-500 animate-pulse" />
-              Lives en cours ({MOCK_LIVES.length})
+              Lives en cours ({displayedLives.length})
             </h2>
           </div>
 
           {/* Live Streams Directory */}
           <div className="flex-1 overflow-y-auto px-5 pb-6 space-y-4">
-            {MOCK_LIVES.map((live) => (
+            {displayedLives.map((live) => (
               <div
                 key={live.id}
                 onClick={() => handleJoinLive(live)}
@@ -409,7 +553,7 @@ export default function LiveView({ isOpen, onClose, currentUser, currentUserProf
                   </div>
                   <div className="flex items-center gap-1 px-2.5 py-1 bg-black/60 backdrop-blur-sm rounded-lg text-[9px] font-bold text-zinc-300">
                     <Users size={10} className="text-rose-400" />
-                    {(live.viewerCount / 1000).toFixed(1)}k spectateurs
+                    {live.viewerCount >= 1000 ? `${(live.viewerCount / 1000).toFixed(1)}k` : live.viewerCount} spectateurs
                   </div>
                 </div>
 

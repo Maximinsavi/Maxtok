@@ -23,8 +23,35 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState('');
   const [fileInfo, setFileInfo] = useState<{ name: string; size: string; isLocalBlob: boolean } | null>(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+
+  // Video editing states
+  const [cropRatio, setCropRatio] = useState<'9:16' | '16:9' | '1:1' | 'none'>('none');
+  const [zoomScale, setZoomScale] = useState<number>(1);
+  const [translateY, setTranslateY] = useState<number>(0);
+  const [visualFilter, setVisualFilter] = useState<'none' | 'grayscale' | 'sepia' | 'contrast' | 'invert' | 'blur'>('none');
 
   if (!isOpen) return null;
+
+  const handleClose = () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl('');
+    }
+    setSelectedFile(null);
+    setFileInfo(null);
+    setVideoUrl('');
+    setDescription('');
+    setCategory('comedy');
+    setSongName('Son original');
+    setCropRatio('none');
+    setZoomScale(1);
+    setTranslateY(0);
+    setVisualFilter('none');
+    setError('');
+    setFileError('');
+    onClose();
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -35,6 +62,12 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
 
     const sizeInMB = file.size / (1024 * 1024);
     setSelectedFile(file);
+
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    const newPreviewUrl = URL.createObjectURL(file);
+    setPreviewUrl(newPreviewUrl);
 
     // If file size is under 750 KB, we store it persistently as Base64 in Firestore.
     // 750 KB Base64 string is around 1 MB, which is the Firestore document limit.
@@ -105,11 +138,15 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
         description: description.trim(),
         category,
         songName: songName.trim() || 'Son original',
-        mimeType: fileToUpload.type || 'video/mp4'
+        mimeType: fileToUpload.type || 'video/mp4',
+        cropRatio,
+        zoomScale,
+        translateY,
+        visualFilter
       }, customId);
 
       onUploadSuccess();
-      onClose();
+      handleClose();
     } catch (err) {
       console.error("Error publishing video:", err);
       setError("Une erreur s'est produite lors de la publication. Veuillez réessayer.");
@@ -133,7 +170,7 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
 
         {/* Close Button */}
         <button 
-          onClick={onClose}
+          onClick={handleClose}
           disabled={isUploading}
           className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-full transition-colors disabled:opacity-50"
           id="upload-close-btn"
@@ -197,7 +234,7 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
             )}
 
             {fileInfo && (
-              <div className="p-3 bg-zinc-800/60 border border-zinc-700/50 rounded-xl space-y-1.5">
+              <div className="p-3 bg-zinc-800/60 border border-zinc-700/50 rounded-xl space-y-2.5">
                 <div className="flex items-center justify-between text-xs text-zinc-300">
                   <span className="font-semibold truncate max-w-[70%]" title={fileInfo.name}>
                     📁 {fileInfo.name}
@@ -210,12 +247,131 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
                 <div className="flex items-start gap-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-[11px] leading-relaxed">
                   <Info size={14} className="shrink-0 mt-0.5" />
                   <span>
-                    <strong>Optimisation automatique :</strong> Si cette vidéo dépasse 750 Ko, elle sera découpée automatiquement en morceaux optimisés de 750 Ko ou moins pour assurer un stockage sécurisé et stable, puis réassemblée de manière transparente lors de la lecture.
+                    <strong>Optimisation automatique :</strong> Si cette vidéo dépasse 750 Ko, elle sera découpée automatiquement en morceaux optimisés de 750 Ko ou moins pour assurer un stockage sécurisé et stable.
                   </span>
                 </div>
+
+                {previewUrl && (
+                  <div className="flex flex-col items-center justify-center p-3 bg-zinc-950 rounded-xl border border-zinc-850">
+                    <span className="block text-[10px] font-extrabold text-rose-400 uppercase tracking-wider mb-2 self-start">Aperçu Réel 🎬</span>
+                    <div className={`overflow-hidden relative flex items-center justify-center bg-zinc-900 rounded-lg transition-all duration-300 ${
+                      cropRatio === '1:1' ? 'aspect-square w-36' :
+                      cropRatio === '16:9' ? 'aspect-video w-48' :
+                      cropRatio === '9:16' ? 'aspect-[9/16] h-48' :
+                      'w-44 h-32'
+                    }`}>
+                      <video
+                        src={previewUrl}
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                        className="w-full h-full"
+                        style={{
+                          transform: `scale(${zoomScale}) translateY(${translateY}px)`,
+                          filter: visualFilter === 'none' ? '' :
+                                  visualFilter === 'grayscale' ? 'grayscale(100%)' :
+                                  visualFilter === 'sepia' ? 'sepia(80%)' :
+                                  visualFilter === 'contrast' ? 'contrast(140%) saturate(120%)' :
+                                  visualFilter === 'invert' ? 'invert(100%)' :
+                                  visualFilter === 'blur' ? 'blur(4px)' : '',
+                          objectFit: cropRatio === 'none' ? 'cover' : 'contain',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
+
+          {/* Video Editing Options */}
+          {selectedFile && (
+            <div className="p-4 bg-zinc-800/40 border border-zinc-800 rounded-xl space-y-3.5">
+              <span className="block text-[11px] font-extrabold text-rose-400 uppercase tracking-widest">Options de Retouche Vidéo ✨</span>
+              
+              <div className="space-y-3">
+                {/* Crop aspect ratio buttons */}
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Format de Recadrage (Crop)</label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { id: 'none', label: 'Original' },
+                      { id: '9:16', label: '9:16' },
+                      { id: '1:1', label: '1:1' },
+                      { id: '16:9', label: '16:9' }
+                    ].map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setCropRatio(item.id as any)}
+                        className={`py-1.5 rounded-lg text-[10px] font-bold transition-all border ${
+                          cropRatio === item.id
+                            ? 'bg-rose-500/20 text-rose-400 border-rose-500/50'
+                            : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-zinc-700'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Scale Slider */}
+                  <div>
+                    <div className="flex justify-between text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                      <span>Zoom</span>
+                      <span className="text-rose-400 font-mono">{zoomScale.toFixed(2)}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="1"
+                      max="2"
+                      step="0.05"
+                      value={zoomScale}
+                      onChange={(e) => setZoomScale(parseFloat(e.target.value))}
+                      className="w-full accent-rose-500 bg-zinc-950 h-1.5 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Vertical offset displacement */}
+                  <div>
+                    <div className="flex justify-between text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                      <span>Déplacement Y</span>
+                      <span className="text-rose-400 font-mono">{translateY}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-150"
+                      max="150"
+                      step="5"
+                      value={translateY}
+                      onChange={(e) => setTranslateY(parseInt(e.target.value))}
+                      className="w-full accent-rose-500 bg-zinc-950 h-1.5 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {/* Visual Filters selection */}
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Filtres Créatifs</label>
+                  <select
+                    value={visualFilter}
+                    onChange={(e) => setVisualFilter(e.target.value as any)}
+                    className="w-full bg-zinc-950 text-xs p-2.5 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none"
+                  >
+                    <option value="none">Aucun 🌈</option>
+                    <option value="grayscale">Noir & Blanc 🎞️</option>
+                    <option value="sepia">Sépia Rétro 📜</option>
+                    <option value="contrast">Cinéma Élevé 🎬</option>
+                    <option value="invert">Négatif 🕶️</option>
+                    <option value="blur">Flou Artistique 🌫️</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Description / Caption */}
           <div>
@@ -276,7 +432,7 @@ export default function UploadModal({ isOpen, onClose, currentUser, onUploadSucc
           <div className="pt-3 border-t border-zinc-800 flex justify-end gap-3">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               disabled={isUploading}
               className="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold rounded-xl transition-colors disabled:opacity-50"
               id="upload-cancel-btn"

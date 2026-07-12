@@ -416,8 +416,8 @@ export async function getVideoChunks(videoId: string, mimeType: string = 'video/
   return new Blob(byteCharactersList, { type: mimeType });
 }
 
-// Update a video's details (description, category, songName)
-export async function updateVideo(videoId: string, updatedFields: { description: string; category: string; songName: string }): Promise<void> {
+// Update a video's details (description, category, songName, and optional styling/cropping properties)
+export async function updateVideo(videoId: string, updatedFields: Partial<Video>): Promise<void> {
   try {
     const videoRef = doc(db, 'videos', videoId);
     await updateDoc(videoRef, updatedFields);

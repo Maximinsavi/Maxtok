@@ -46,6 +46,10 @@ export default function VideoCard({
   const [editDescription, setEditDescription] = useState(video.description);
   const [editCategory, setEditCategory] = useState(video.category);
   const [editSongName, setEditSongName] = useState(video.songName);
+  const [editCropRatio, setEditCropRatio] = useState<'9:16' | '16:9' | '1:1' | 'none'>(video.cropRatio || 'none');
+  const [editZoomScale, setEditZoomScale] = useState<number>(video.zoomScale || 1);
+  const [editTranslateY, setEditTranslateY] = useState<number>(video.translateY || 0);
+  const [editVisualFilter, setEditVisualFilter] = useState<'none' | 'grayscale' | 'sepia' | 'contrast' | 'invert' | 'blur'>(video.visualFilter || 'none');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showOptionsDropdown, setShowOptionsDropdown] = useState(false);
@@ -224,6 +228,10 @@ export default function VideoCard({
     setEditDescription(video.description);
     setEditCategory(video.category);
     setEditSongName(video.songName);
+    setEditCropRatio(video.cropRatio || 'none');
+    setEditZoomScale(video.zoomScale || 1);
+    setEditTranslateY(video.translateY || 0);
+    setEditVisualFilter(video.visualFilter || 'none');
     setIsEditing(false);
   }, [video]);
 
@@ -234,7 +242,11 @@ export default function VideoCard({
       await updateVideo(video.id, {
         description: editDescription.trim(),
         category: editCategory,
-        songName: editSongName.trim() || 'Son original'
+        songName: editSongName.trim() || 'Son original',
+        cropRatio: editCropRatio,
+        zoomScale: editZoomScale,
+        translateY: editTranslateY,
+        visualFilter: editVisualFilter
       });
       setIsEditing(false);
     } catch (err) {
@@ -375,25 +387,57 @@ export default function VideoCard({
     }
   };
 
+  const currentCrop = isEditing ? editCropRatio : (video.cropRatio || 'none');
+  const currentZoom = isEditing ? editZoomScale : (video.zoomScale || 1);
+  const currentTranslateY = isEditing ? editTranslateY : (video.translateY || 0);
+  const currentFilter = isEditing ? editVisualFilter : (video.visualFilter || 'none');
+
+  const filterStyles: Record<string, string> = {
+    none: '',
+    grayscale: 'grayscale(100%)',
+    sepia: 'sepia(80%)',
+    contrast: 'contrast(140%) saturate(120%)',
+    invert: 'invert(100%)',
+    blur: 'blur(4px)'
+  };
+
+  const videoStyle: React.CSSProperties = {
+    transform: `scale(${currentZoom}) translateY(${currentTranslateY}px)`,
+    filter: filterStyles[currentFilter] || '',
+    objectFit: currentCrop === 'none' ? 'cover' : 'contain',
+    transition: isEditing ? 'none' : 'transform 0.3s ease, filter 0.3s ease'
+  };
+
+  const getContainerClassName = () => {
+    if (currentCrop === '1:1') return 'aspect-square w-full max-w-full max-h-[100%] overflow-hidden relative flex items-center justify-center bg-zinc-950 transition-all duration-300';
+    if (currentCrop === '16:9') return 'aspect-video w-full max-w-full max-h-[100%] overflow-hidden relative flex items-center justify-center bg-zinc-950 transition-all duration-300';
+    if (currentCrop === '9:16') return 'aspect-[9/16] h-full max-w-full overflow-hidden relative flex items-center justify-center bg-zinc-950 transition-all duration-300';
+    return 'w-full h-full relative overflow-hidden flex items-center justify-center transition-all duration-300';
+  };
+
   return (
     <div 
       ref={containerRef}
       className="relative w-full h-full snap-start bg-black flex flex-col items-center justify-center overflow-hidden"
       id={`video-card-${video.id}`}
     >
-      {/* Video element */}
-      <video
-        ref={videoRef}
-        src={resolvedUrl}
-        loop
-        playsInline
-        webkit-playsinline="true"
-        referrerPolicy="no-referrer"
-        onClick={handleVideoClick}
-        onLoadedData={() => setVideoLoaded(true)}
-        className="w-full h-full object-cover cursor-pointer"
-        id={`video-player-${video.id}`}
-      />
+      {/* Crop container wrapper */}
+      <div className={getContainerClassName()}>
+        {/* Video element */}
+        <video
+          ref={videoRef}
+          src={resolvedUrl}
+          loop
+          playsInline
+          webkit-playsinline="true"
+          referrerPolicy="no-referrer"
+          onClick={handleVideoClick}
+          onLoadedData={() => setVideoLoaded(true)}
+          className="w-full h-full cursor-pointer"
+          style={videoStyle}
+          id={`video-player-${video.id}`}
+        />
+      </div>
 
       {/* Loading Spinner */}
       {(!videoLoaded || isLoadingChunks) && (
@@ -704,42 +748,127 @@ export default function VideoCard({
                 <p className="text-[11px] text-zinc-400 mt-1">Mettez à jour les détails de votre vidéo</p>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
                 <div>
                   <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Description / Légende</label>
                   <textarea
                     value={editDescription}
                     onChange={(e) => setEditDescription(e.target.value)}
-                    className="w-full bg-zinc-950 text-xs p-3 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none resize-none h-20"
+                    className="w-full bg-zinc-950 text-xs p-3 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none resize-none h-16"
                     placeholder="Écrivez une description..."
                   />
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Catégorie</label>
-                  <select
-                    value={editCategory}
-                    onChange={(e) => setEditCategory(e.target.value)}
-                    className="w-full bg-zinc-950 text-xs p-3 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none"
-                  >
-                    <option value="comedy">Humour 🎭</option>
-                    <option value="tech">Tech 💻</option>
-                    <option value="music">Musique 🎧</option>
-                    <option value="sports">Sports 🛹</option>
-                    <option value="food">Food 🍔</option>
-                    <option value="nature">Nature 🌲</option>
-                  </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Catégorie</label>
+                    <select
+                      value={editCategory}
+                      onChange={(e) => setEditCategory(e.target.value)}
+                      className="w-full bg-zinc-950 text-xs p-2.5 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none"
+                    >
+                      <option value="comedy">Humour 🎭</option>
+                      <option value="tech">Tech 💻</option>
+                      <option value="music">Musique 🎧</option>
+                      <option value="sports">Sports 🛹</option>
+                      <option value="food">Food 🍔</option>
+                      <option value="nature">Nature 🌲</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Musique / Son</label>
+                    <input
+                      type="text"
+                      value={editSongName}
+                      onChange={(e) => setEditSongName(e.target.value)}
+                      className="w-full bg-zinc-950 text-xs p-2.5 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none"
+                      placeholder="Ex: Son original - @nom"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Musique / Son</label>
-                  <input
-                    type="text"
-                    value={editSongName}
-                    onChange={(e) => setEditSongName(e.target.value)}
-                    className="w-full bg-zinc-950 text-xs p-3 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none"
-                    placeholder="Ex: Son original - @nom_utilisateur"
-                  />
+                <div className="border-t border-zinc-800/60 pt-3">
+                  <span className="block text-[10px] font-extrabold text-rose-400 uppercase tracking-widest mb-2.5">Outils d'Édition Vidéo 🎬</span>
+                  
+                  <div className="space-y-3">
+                    {/* Crop aspect ratio buttons */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Format de Recadrage (Crop)</label>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {[
+                          { id: 'none', label: 'Original' },
+                          { id: '9:16', label: '9:16' },
+                          { id: '1:1', label: '1:1' },
+                          { id: '16:9', label: '16:9' }
+                        ].map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setEditCropRatio(item.id as any)}
+                            className={`py-1.5 rounded-lg text-[10px] font-bold transition-all border ${
+                              editCropRatio === item.id
+                                ? 'bg-rose-500/20 text-rose-400 border-rose-500/50'
+                                : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-zinc-700'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Scale Slider */}
+                    <div>
+                      <div className="flex justify-between text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                        <span>Zoom</span>
+                        <span className="text-rose-400">{editZoomScale.toFixed(2)}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="2"
+                        step="0.05"
+                        value={editZoomScale}
+                        onChange={(e) => setEditZoomScale(parseFloat(e.target.value))}
+                        className="w-full accent-rose-500 bg-zinc-950 h-1.5 rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+
+                    {/* Vertical offset displacement */}
+                    <div>
+                      <div className="flex justify-between text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                        <span>Déplacement vertical</span>
+                        <span className="text-rose-400">{editTranslateY}px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-150"
+                        max="150"
+                        step="5"
+                        value={editTranslateY}
+                        onChange={(e) => setEditTranslateY(parseInt(e.target.value))}
+                        className="w-full accent-rose-500 bg-zinc-950 h-1.5 rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+
+                    {/* Visual Filters selection */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Filtres Créatifs</label>
+                      <select
+                        value={editVisualFilter}
+                        onChange={(e) => setEditVisualFilter(e.target.value as any)}
+                        className="w-full bg-zinc-950 text-xs p-2.5 rounded-xl text-white border border-zinc-800 focus:border-rose-500 outline-none"
+                      >
+                        <option value="none">Aucun 🌈</option>
+                        <option value="grayscale">Noir & Blanc 🎞️</option>
+                        <option value="sepia">Sépia Rétro 📜</option>
+                        <option value="contrast">Cinéma Élevé 🎬</option>
+                        <option value="invert">Négatif 🕶️</option>
+                        <option value="blur">Flou Artistique 🌫️</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
 

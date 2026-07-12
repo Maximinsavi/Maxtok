@@ -76,5 +76,20 @@ service cloud.firestore {
       allow read: if isAuthenticated() && request.auth.uid == userId;
       allow write: if isAuthenticated();
     }
+
+    // Lives rules
+    match /lives/{liveId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.streamerId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.streamerId == request.auth.uid || request.resource.data.viewerCount != resource.data.viewerCount);
+      allow delete: if isAuthenticated() && resource.data.streamerId == request.auth.uid;
+
+      // Chat rules (subcollection)
+      match /chat/{chatMessageId} {
+        allow read: if true;
+        allow create: if isAuthenticated();
+        allow update, delete: if false;
+      }
+    }
   }
 }
